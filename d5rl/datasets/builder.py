@@ -14,7 +14,7 @@ import logging
 
 from typing import List, Tuple, Optional
 from d5rl.utils.roles import Role, Race, Alignment, Sex
-from d5rl.datasets.autoascend import AutoAscendDataset
+from d5rl.datasets.autoascend import AutoAscendTTYDataset
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -73,15 +73,22 @@ class AutoAscendDatasetBuilder:
 
     def build(
         self,
-        batch_size: int,
-    ) -> AutoAscendDataset:
+        batch_size          : int,
+        seq_len             : int = 1,
+        n_prefetched_batches: int = 1000
+    ) -> AutoAscendTTYDataset:
+        """
+        Args:
+            batch_size: well
+            n_prefetch_states: how many states will be preloaded into the device memory (CPU for now)
+        """
         # Build a sql query to select only filtered ones
         query, query_args = self._build_sql_query()
 
-        tp = ThreadPoolExecutor(max_workers=10)
+        tp = ThreadPoolExecutor(max_workers=32)
         self._dataset = nld.TtyrecDataset(
             dataset_name       = "autoascend",
-            batch_size         = 1,
+            batch_size         = batch_size,
             seq_length         = 1,
             shuffle            = True,
             loop_forever       = True,
@@ -91,7 +98,12 @@ class AutoAscendDatasetBuilder:
         )
         print(f"Total games in the filtered dataset: {len(self._dataset._gameids)}")
 
-        return AutoAscendDataset(self._dataset, batch_size)
+        return AutoAscendTTYDataset(
+            self._dataset, 
+            batch_size           = batch_size,
+            seq_len              = seq_len,
+            n_prefetched_batches = n_prefetched_batches
+        )
 
     def _build_sql_query(self) -> Tuple[str, Tuple]:
         subselect_sql      = "SELECT gameid FROM games WHERE "
