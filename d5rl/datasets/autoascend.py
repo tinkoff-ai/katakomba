@@ -4,6 +4,7 @@ import itertools
 from torch.utils.data import IterableDataset
 from nle.dataset.dataset import TtyrecDataset
 from d5rl.utils.observations import tty_to_numpy
+from d5rl.utils.actions import ascii_actions_to_gym_actions
 
 from copy import deepcopy
 
@@ -81,8 +82,11 @@ class _AutoAscendTTYIterator:
         self._cur_ind = 0
 
         # Just started
+        start_index = 0
         if self._prev_batch is None:
             self._prev_batch = next(self._iterator)
+        else:
+            start_index
 
         cur_batch = next(self._iterator)
         for ind in range(self._n_prefetched_batches):
@@ -93,7 +97,7 @@ class _AutoAscendTTYIterator:
                 tty_cursor = self._prev_batch["tty_cursor"].squeeze()
             )
             # [batch_size, 1]
-            action = cur_batch["keypresses"].reshape(-1, 1)
+            action = ascii_actions_to_gym_actions(cur_batch["keypresses"].reshape(-1, 1))
             # [batch_size, 1]
             reward = (cur_batch["scores"] - self._prev_batch["scores"]).reshape(-1, 1) # potentials are better
             # [batch_size, 1]

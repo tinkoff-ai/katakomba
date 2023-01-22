@@ -1,10 +1,14 @@
 """
 Utilities for better debugging experience connected to actions.
 """
+import numpy as np
 
 from nle.nethack.actions import ACTIONS, Command, CompassDirection, CompassDirectionLonger, MiscDirection, MiscAction, TextCharacters
 from typing import Union, Optional
 
+_ASCII_TO_GYM_ACTION = {
+    action.value:ind for ind, action in enumerate(ACTIONS)
+}
 
 def nle_action_to_gym_action(
     nle_action: Union[Command, CompassDirection, CompassDirectionLonger, MiscDirection, MiscAction, TextCharacters]
@@ -18,6 +22,29 @@ def nle_action_to_gym_action(
             return ind
 
     return None
+
+def ascii_action_to_gym_action(
+    ascii_action: int
+) -> int:
+    """
+    Return gym action index for ascii action (useful for AA dataset).
+    """
+    return _ASCII_TO_GYM_ACTION[ascii_action]
+
+
+def ascii_actions_to_gym_actions(
+    ascii_actions: np.ndarray
+) -> np.ndarray:
+    """
+    Args
+      ascii_actions: [batch_size, 1]
+    Returns
+      gym_actions: [batch_size, 1]
+    """
+    gym_actions = np.empty_like(ascii_actions)
+    for b in range(gym_actions.shape[0]):
+        gym_actions[b, 0] = _ASCII_TO_GYM_ACTION[ascii_actions[b, 0]]
+    return gym_actions
 
 def yes_nle_action():
     """
