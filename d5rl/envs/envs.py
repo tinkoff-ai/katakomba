@@ -325,7 +325,7 @@ class NetHackChallenge(NetHackScore):
             "tty_cursor",
             "misc",
         ),
-        no_progress_timeout: int = 10_000,
+        no_progress_timeout: int = 1000,
         **kwargs,
     ):
         actions = nethack.ACTIONS

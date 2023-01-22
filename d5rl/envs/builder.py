@@ -81,9 +81,9 @@ class NetHackEnvBuilder:
 
         # Environment and its wrapper are dataset-dependent (wrappers are needed for producing images of tty)
         if self._env_wrapper:
-            env_fn = lambda char: self._env_wrapper(self._env_fn(char))
+            env_fn = lambda char: self._env_wrapper(self._env_fn(character=char, savedir=False))
         else:
-            env_fn = self._env_fn
+            env_fn = lambda char: self._env_fn(character=char, savedir=False)
 
         # Generate nethack challenges
         for character in sorted(eval_characters):
@@ -92,3 +92,14 @@ class NetHackEnvBuilder:
             else:
                 for seed in self._eval_seeds:
                     yield character, env_fn(character), seed
+
+    def get_action_dim(self) -> int:
+        if self._env_wrapper:
+            env_fn = lambda char: self._env_wrapper(self._env_fn(character=char, savedir=False))
+        else:
+            env_fn = self._env_fn
+
+        # Environment with a random character (action space does not depent on the character)
+        dummy_env = env_fn("@")
+        
+        return dummy_env.action_space.n
