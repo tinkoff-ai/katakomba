@@ -26,7 +26,7 @@ class TrainConfig:
     # NetHack
     env        : str                 = "NetHackScore-v0-tty-bot-v0"
     character  : str                 = "mon-hum-neutral-male"
-    eval_seeds: Optional[Tuple[int]] = (228,)
+    eval_seeds: Optional[Tuple[int]] = (228, 1337, 1307, 2, 10000)
 
     # Training
     device          : str           = "cpu"
@@ -36,7 +36,7 @@ class TrainConfig:
     max_timesteps   : int           = int(1e6)
     checkpoints_path: Optional[str] = None
     load_model      : str           = ""
-    batch_size      : int           = 256
+    batch_size      : int           = 512
 
     # Wandb logging
     project: str = "NeuralNetHack"
@@ -267,8 +267,7 @@ def train(config: TrainConfig):
         log_dict = trainer.train(batch)
 
         # Log train
-        print(log_dict)
-        # wandb.log(log_dict, step=trainer.total_it)
+        wandb.log(log_dict, step=trainer.total_it)
 
         # Evaluate episode
         if (t) % config.eval_freq == 0:
@@ -282,6 +281,7 @@ def train(config: TrainConfig):
             )
 
             print(eval_stats)
+            wandb.log(eval_stats, step=trainer.total_it)
             # print("---------------------------------------")
             # print(
             #     f"Evaluation over {config.n_episodes} episodes: "
