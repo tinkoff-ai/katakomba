@@ -97,7 +97,7 @@ class _AutoAscendTTYIterator:
                 tty_cursor = self._prev_batch["tty_cursor"].squeeze()
             )
             # [batch_size, 1]
-            action = ascii_actions_to_gym_actions(cur_batch["keypresses"].reshape(-1, 1))
+            action = ascii_actions_to_gym_actions(self._prev_batch["keypresses"].reshape(-1, 1))
             # [batch_size, 1]
             reward = (cur_batch["scores"] - self._prev_batch["scores"]).reshape(-1, 1) # potentials are better
             # [batch_size, 1]
