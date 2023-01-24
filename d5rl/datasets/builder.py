@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple
 
 import nle.dataset as nld
 
-from d5rl.datasets.autoascend import AutoAscendTTYDataset, BaseAutoAscend
+from d5rl.datasets import AutoAscendTTYDataset, BaseAutoAscend
 from d5rl.utils.roles import Alignment, Race, Role, Sex
 
 

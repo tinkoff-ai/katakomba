@@ -3,10 +3,10 @@ from copy import deepcopy
 
 import numpy as np
 from nle.dataset.dataset import TtyrecDataset
-from torch.utils.data import IterableDataset
 
 from d5rl.utils.actions import ascii_actions_to_gym_actions
 from d5rl.utils.observations import tty_to_numpy
+from d5rl.datasets import BaseAutoAscend
 
 
 class _AutoAscendTTYIterator:
@@ -136,27 +136,6 @@ class _AutoAscendTTYIterator:
 
             self._prev_batch = deepcopy(cur_batch)
             cur_batch = next(self._iterator)
-
-
-class BaseAutoAscend(IterableDataset):
-    def __init__(
-        self,
-        autoascend_iterator_cls,
-        ttyrecdata: TtyrecDataset,
-        batch_size: int,
-        **kwawgs
-    ):
-        self._autoascend_iterator_cls = autoascend_iterator_cls
-        self._ttyrecdata = ttyrecdata
-        self._batch_size = batch_size
-        self._kwargs = kwawgs
-
-    def __iter__(self):
-        return iter(
-            self._autoascend_iterator_cls(
-                ttyrecdata=self._ttyrecdata, batch_size=self._batch_size, **self._kwargs
-            )
-        )
 
 
 class AutoAscendTTYDataset(BaseAutoAscend):
