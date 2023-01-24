@@ -1,6 +1,7 @@
+from typing import Optional, Tuple
+
 import gym
 from nle.env.base import NLE
-from typing import Optional, Tuple
 
 
 class NetHackWrapper(gym.Wrapper):
@@ -14,10 +15,10 @@ class NetHackWrapper(gym.Wrapper):
         self.env: NLE = env
 
     def seed(
-        self, 
-        core  : Optional[int]  = None,
-        disp  : Optional[int]  = None,
-        reseed: bool           = False
+        self,
+        core: Optional[int] = None,
+        disp: Optional[int] = None,
+        reseed: bool = False,
     ) -> Tuple[int, int, bool]:
         """
         Sets the state of the NetHack RNGs after the next reset.

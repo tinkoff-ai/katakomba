@@ -6,8 +6,8 @@ Adopted from here: https://github.com/facebookresearch/nle/blob/4f5b57ea0e18f80e
 """
 
 import enum
-import numpy as np
 
+import numpy as np
 from nle import nethack
 from nle.env import base
 

@@ -1,10 +1,8 @@
-
 import gym
 import numpy as np
-
 from nle import nethack
 from nle.env import base
-from typing import Tuple
+
 from d5rl.wrappers.base import NetHackWrapper
 
 
@@ -19,13 +17,17 @@ class TTYWrapper(NetHackWrapper):
     ):
         super().__init__(env)
 
-        self.shape = (nethack.nethack.TERMINAL_SHAPE[0], nethack.nethack.TERMINAL_SHAPE[1], 3)
+        self.shape = (
+            nethack.nethack.TERMINAL_SHAPE[0],
+            nethack.nethack.TERMINAL_SHAPE[1],
+            3,
+        )
         self.observation_space = gym.spaces.Box(
-                low=0, high=255, shape=self.shape, dtype=np.uint8
+            low=0, high=255, shape=self.shape, dtype=np.uint8
         )
 
     def _get_observation(self, observation):
-        tty       = np.zeros(self.shape, dtype=np.uint8)
+        tty = np.zeros(self.shape, dtype=np.uint8)
         agent_pos = observation["tty_cursor"]
 
         tty[:, :, 0] = observation["tty_chars"]

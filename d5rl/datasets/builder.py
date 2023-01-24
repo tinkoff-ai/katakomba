@@ -9,25 +9,23 @@ What to keep in mind:
 """
 from __future__ import annotations
 
-import nle.dataset as nld
 import logging
-
-from typing import List, Tuple, Optional
-from d5rl.utils.roles import Role, Race, Alignment, Sex
-from d5rl.datasets.autoascend import AutoAscendTTYDataset
 from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional, Tuple
+
+import nle.dataset as nld
+
+from d5rl.datasets import BaseAutoAscend, SARSAutoAscendTTYDataset
+from d5rl.utils.roles import Alignment, Race, Role, Sex
 
 
 class AutoAscendDatasetBuilder:
     """
-    This is the most basic wrapper. 
+    This is the most basic wrapper.
     It obeys the original logic of the TTYRec dataset that samples data within-game-sequentially.
     """
-    def __init__(
-        self, 
-        path      : str = "data/nle_data",
-        db_path   : str = "ttyrecs.db"
-    ):
+
+    def __init__(self, path: str = "data/nle_data", db_path: str = "ttyrecs.db"):
         # Create a sql-lite database for keeping trajectories
         if not nld.db.exists(db_path):
             nld.db.create(db_path)
@@ -35,17 +33,19 @@ class AutoAscendDatasetBuilder:
 
         # Create a connection to specify the database to use
         db_conn = nld.db.connect(filename=db_path)
-        logging.info(f"AutoAscend Dataset has {nld.db.count_games('autoascend', conn=db_conn)} games.")
+        logging.info(
+            f"AutoAscend Dataset has {nld.db.count_games('autoascend', conn=db_conn)} games."
+        )
 
         # Pre-init filters
         # Note that all strings are further converted to be first-letter-capitalized
         # This is how it's stored in dungeons data :shrug:
-        self._races        : Optional[List[str]] = None
-        self._game_ids     : Optional[List[int]] = None
-        self._alignments   : Optional[List[str]] = None
-        self._sex          : Optional[List[str]] = None
-        self._roles        : Optional[List[str]] = None
-        self._game_versions: List[str]           = ["3.6.6"]
+        self._races: Optional[List[str]] = None
+        self._game_ids: Optional[List[int]] = None
+        self._alignments: Optional[List[str]] = None
+        self._sex: Optional[List[str]] = None
+        self._roles: Optional[List[str]] = None
+        self._game_versions: List[str] = ["3.6.6"]
 
     def races(self, races: List[Race]) -> AutoAscendDatasetBuilder:
         self._races = [str(race.value).title() for race in races]
@@ -72,11 +72,8 @@ class AutoAscendDatasetBuilder:
         return self
 
     def build(
-        self,
-        batch_size          : int,
-        seq_len             : int = 1,
-        n_prefetched_batches: int = 1000
-    ) -> AutoAscendTTYDataset:
+        self, batch_size: int, auto_ascend_cls=SARSAutoAscendTTYDataset, **kwargs
+    ) -> BaseAutoAscend:
         """
         Args:
             batch_size: well
@@ -87,46 +84,53 @@ class AutoAscendDatasetBuilder:
 
         tp = ThreadPoolExecutor(max_workers=32)
         self._dataset = nld.TtyrecDataset(
-            dataset_name       = "autoascend",
-            batch_size         = batch_size,
-            seq_length         = 1,
-            shuffle            = True,
-            loop_forever       = True,
-            subselect_sql      = query,
-            subselect_sql_args = query_args,
-            threadpool         = tp
+            dataset_name="autoascend",
+            batch_size=batch_size,
+            seq_length=1,
+            shuffle=True,
+            loop_forever=True,
+            subselect_sql=query,
+            subselect_sql_args=query_args,
+            threadpool=tp,
         )
         print(f"Total games in the filtered dataset: {len(self._dataset._gameids)}")
 
-        return AutoAscendTTYDataset(
-            self._dataset, 
-            batch_size           = batch_size,
-            seq_len              = seq_len,
-            n_prefetched_batches = n_prefetched_batches
-        )
+        return auto_ascend_cls(self._dataset, batch_size=batch_size, **kwargs)
 
     def _build_sql_query(self) -> Tuple[str, Tuple]:
-        subselect_sql      = "SELECT gameid FROM games WHERE "
+        subselect_sql = "SELECT gameid FROM games WHERE "
 
         # Game version (there can be potentially recordings from various NetHack versions)
-        subselect_sql      += "version in ({seq}) AND ".format(seq=','.join(['?']*len(self._game_versions)))
-        subselect_sql_args  = tuple(self._game_versions)
+        subselect_sql += "version in ({seq}) AND ".format(
+            seq=",".join(["?"] * len(self._game_versions))
+        )
+        subselect_sql_args = tuple(self._game_versions)
 
         # If specific game ids were specified
         if self._game_ids is not None:
-            subselect_sql      += "gameid in ({seq}) AND ".format(seq=','.join(['?']*len(self._game_ids)))
+            subselect_sql += "gameid in ({seq}) AND ".format(
+                seq=",".join(["?"] * len(self._game_ids))
+            )
             subselect_sql_args += tuple(self._game_ids)
         if self._roles:
-            subselect_sql      += "role in ({seq}) AND ".format(seq=','.join(['?']*len(self._roles)))
+            subselect_sql += "role in ({seq}) AND ".format(
+                seq=",".join(["?"] * len(self._roles))
+            )
             subselect_sql_args += tuple(self._roles)
         if self._races:
-            subselect_sql      += "race in ({seq}) AND ".format(seq=','.join(['?']*len(self._races)))
+            subselect_sql += "race in ({seq}) AND ".format(
+                seq=",".join(["?"] * len(self._races))
+            )
             subselect_sql_args += tuple(self._races)
         if self._alignments:
-            subselect_sql      += "align in ({seq}) AND ".format(seq=','.join(['?']*len(self._alignments)))
+            subselect_sql += "align in ({seq}) AND ".format(
+                seq=",".join(["?"] * len(self._alignments))
+            )
             subselect_sql_args += tuple(self._alignments)
         if self._sex:
-            subselect_sql      += "gender in ({seq}) AND ".format(seq=','.join(['?']*len(self._sex)))
+            subselect_sql += "gender in ({seq}) AND ".format(
+                seq=",".join(["?"] * len(self._sex))
+            )
             subselect_sql_args += tuple(self._sex)
 
         # There will always be an AND at the end
