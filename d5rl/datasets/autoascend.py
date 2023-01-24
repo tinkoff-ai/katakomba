@@ -138,7 +138,28 @@ class _AutoAscendTTYIterator:
             cur_batch = next(self._iterator)
 
 
-class AutoAscendTTYDataset(IterableDataset):
+class BaseAutoAscend(IterableDataset):
+    def __init__(
+        self,
+        autoascend_iterator_cls,
+        ttyrecdata: TtyrecDataset,
+        batch_size: int,
+        **kwawgs
+    ):
+        self._autoascend_iterator_cls = autoascend_iterator_cls
+        self._ttyrecdata = ttyrecdata
+        self._batch_size = batch_size
+        self._kwargs = kwawgs
+
+    def __iter__(self):
+        return iter(
+            self._autoascend_iterator_cls(
+                ttyrecdata=self._ttyrecdata, batch_size=self._batch_size, **self._kwargs
+            )
+        )
+
+
+class AutoAscendTTYDataset(BaseAutoAscend):
     def __init__(
         self,
         ttyrecdata: TtyrecDataset,
@@ -146,17 +167,10 @@ class AutoAscendTTYDataset(IterableDataset):
         seq_len: int,
         n_prefetched_batches: int,
     ):
-        self._ttyrecdata = ttyrecdata
-        self._batch_size = batch_size
-        self._n_prefetched_batches = n_prefetched_batches
-        self._seq_len = seq_len
-
-    def __iter__(self):
-        return iter(
-            _AutoAscendTTYIterator(
-                ttyrecdata=self._ttyrecdata,
-                batch_size=self._batch_size,
-                seq_len=self._seq_len,
-                n_prefetched_batches=self._n_prefetched_batches,
-            )
+        super().__init__(
+            _AutoAscendTTYIterator,
+            ttyrecdata,
+            batch_size,
+            seq_len=seq_len,
+            n_prefetched_batches=n_prefetched_batches,
         )

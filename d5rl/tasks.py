@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Tuple
 
 from d5rl.datasets.builder import AutoAscendDatasetBuilder
 from d5rl.envs import NetHackChallenge

@@ -4,9 +4,8 @@ import uuid
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
-import gym
 import numpy as np
 import pyrallis
 import torch

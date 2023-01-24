@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple
 
 import nle.dataset as nld
 
-from d5rl.datasets.autoascend import AutoAscendTTYDataset
+from d5rl.datasets.autoascend import AutoAscendTTYDataset, BaseAutoAscend
 from d5rl.utils.roles import Alignment, Race, Role, Sex
 
 
@@ -72,8 +72,8 @@ class AutoAscendDatasetBuilder:
         return self
 
     def build(
-        self, batch_size: int, seq_len: int = 1, n_prefetched_batches: int = 1000
-    ) -> AutoAscendTTYDataset:
+        self, batch_size: int, auto_ascend_cls=AutoAscendTTYDataset, **kwargs
+    ) -> BaseAutoAscend:
         """
         Args:
             batch_size: well
@@ -95,12 +95,7 @@ class AutoAscendDatasetBuilder:
         )
         print(f"Total games in the filtered dataset: {len(self._dataset._gameids)}")
 
-        return AutoAscendTTYDataset(
-            self._dataset,
-            batch_size=batch_size,
-            seq_len=seq_len,
-            n_prefetched_batches=n_prefetched_batches,
-        )
+        return auto_ascend_cls(self._dataset, batch_size=batch_size, **kwargs)
 
     def _build_sql_query(self) -> Tuple[str, Tuple]:
         subselect_sql = "SELECT gameid FROM games WHERE "

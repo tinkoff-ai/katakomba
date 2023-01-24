@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 from itertools import product
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from nle.env.base import NLE
 
-from d5rl.envs import NetHackChallenge
 from d5rl.utils.roles import ALLOWED_COMBOS, Alignment, Race, Role, Sex
 from d5rl.wrappers import NetHackWrapper
 
