@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple
 
 import nle.dataset as nld
 
-from d5rl.datasets import AutoAscendTTYDataset, BaseAutoAscend
+from d5rl.datasets import BaseAutoAscend, SARSAutoAscendTTYDataset
 from d5rl.utils.roles import Alignment, Race, Role, Sex
 
 
@@ -72,7 +72,7 @@ class AutoAscendDatasetBuilder:
         return self
 
     def build(
-        self, batch_size: int, auto_ascend_cls=AutoAscendTTYDataset, **kwargs
+        self, batch_size: int, auto_ascend_cls=SARSAutoAscendTTYDataset, **kwargs
     ) -> BaseAutoAscend:
         """
         Args:

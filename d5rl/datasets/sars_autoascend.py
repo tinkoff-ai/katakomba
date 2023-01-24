@@ -4,12 +4,12 @@ from copy import deepcopy
 import numpy as np
 from nle.dataset.dataset import TtyrecDataset
 
+from d5rl.datasets import BaseAutoAscend
 from d5rl.utils.actions import ascii_actions_to_gym_actions
 from d5rl.utils.observations import tty_to_numpy
-from d5rl.datasets import BaseAutoAscend
 
 
-class _AutoAscendTTYIterator:
+class _SARSAutoAscendTTYIterator:
     def __init__(
         self,
         ttyrecdata: TtyrecDataset,
@@ -138,7 +138,7 @@ class _AutoAscendTTYIterator:
             cur_batch = next(self._iterator)
 
 
-class AutoAscendTTYDataset(BaseAutoAscend):
+class SARSAutoAscendTTYDataset(BaseAutoAscend):
     def __init__(
         self,
         ttyrecdata: TtyrecDataset,
@@ -147,7 +147,7 @@ class AutoAscendTTYDataset(BaseAutoAscend):
         n_prefetched_batches: int,
     ):
         super().__init__(
-            _AutoAscendTTYIterator,
+            _SARSAutoAscendTTYIterator,
             ttyrecdata,
             batch_size,
             seq_len=seq_len,

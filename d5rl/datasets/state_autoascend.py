@@ -4,7 +4,7 @@ from d5rl.datasets import BaseAutoAscend
 from d5rl.utils.observations import tty_to_numpy
 
 
-class _EncoderAutoAscendIterator:
+class _StateAutoAscendIterator:
     def __init__(
         self,
         ttyrecdata: TtyrecDataset,
@@ -22,14 +22,14 @@ class _EncoderAutoAscendIterator:
             )
 
 
-class EncoderAutoAscendTTYDataset(BaseAutoAscend):
+class StateAutoAscendTTYDataset(BaseAutoAscend):
     def __init__(
         self,
         ttyrecdata: TtyrecDataset,
         batch_size: int,
     ):
         super().__init__(
-            _EncoderAutoAscendIterator,
+            _StateAutoAscendIterator,
             ttyrecdata,
             batch_size,
         )
