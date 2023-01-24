@@ -1,3 +1,1 @@
-from d5rl.envs.envs import (
-    NetHackChallenge
-)
+from d5rl.envs.envs import NetHackChallenge
