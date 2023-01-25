@@ -4,7 +4,7 @@ from copy import deepcopy
 import numpy as np
 from nle.dataset.dataset import TtyrecDataset
 
-from d5rl.datasets import BaseAutoAscend
+from d5rl.datasets.base import BaseAutoAscend
 from d5rl.utils.actions import ascii_actions_to_gym_actions
 from d5rl.utils.observations import tty_to_numpy
 

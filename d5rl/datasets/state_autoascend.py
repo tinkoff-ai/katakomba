@@ -1,6 +1,6 @@
 from nle.dataset.dataset import TtyrecDataset
 
-from d5rl.datasets import BaseAutoAscend
+from d5rl.datasets.base import BaseAutoAscend
 from d5rl.utils.observations import tty_to_numpy
 
 
