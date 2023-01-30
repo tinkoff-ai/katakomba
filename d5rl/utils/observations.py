@@ -25,3 +25,11 @@ def tty_to_numpy(tty_chars, tty_colors, tty_cursor) -> np.ndarray:
         obs[b, tty_cursor[b, 0], tty_cursor[b, 1], 2] = 255
 
     return obs
+
+
+def num_chars() -> int:
+    return 256
+
+
+def num_colors() -> int:
+    return 32

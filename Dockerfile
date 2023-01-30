@@ -1,8 +1,8 @@
-FROM pytorch/pytorch:1.11.0-cuda11.3-cudnn8-devel
+FROM nvidia/cuda:11.7.1-cudnn8-devel-ubuntu20.04
 WORKDIR /workspace
 
-RUN rm /etc/apt/sources.list.d/cuda.list
-RUN rm /etc/apt/sources.list.d/nvidia-ml.list
+RUN #rm /etc/apt/sources.list.d/cuda.list
+RUN #rm /etc/apt/sources.list.d/nvidia-ml.list
 # python, dependencies for mujoco-py, from https://github.com/openai/mujoco-py
 RUN apt-get update -q \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -35,8 +35,10 @@ ENV LD_LIBRARY_PATH /root/.mujoco/mujoco210/bin:${LD_LIBRARY_PATH}
 
 # installing dependencies, optional mujoco_py compilation
 COPY requirements.txt requirements.txt
+RUN pip install --pre torch --force-reinstall --index-url https://download.pytorch.org/whl/nightly/cu117
 RUN pip install -r requirements.txt
-RUN python -c "import mujoco_py"
+
+RUN python3 -c "import mujoco_py"
 
 ### NetHack dependencies
 RUN apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub

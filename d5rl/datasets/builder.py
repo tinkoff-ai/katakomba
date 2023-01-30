@@ -73,7 +73,11 @@ class AutoAscendDatasetBuilder:
         return self
 
     def build(
-        self, batch_size: int, auto_ascend_cls=SARSAutoAscendTTYDataset, **kwargs
+        self,
+        batch_size: int,
+        seq_length=1,
+        auto_ascend_cls=SARSAutoAscendTTYDataset,
+        **kwargs,
     ) -> BaseAutoAscend:
         """
         Args:
@@ -87,7 +91,7 @@ class AutoAscendDatasetBuilder:
         self._dataset = nld.TtyrecDataset(
             dataset_name="autoascend",
             batch_size=batch_size,
-            seq_length=1,
+            seq_length=seq_length,
             shuffle=True,
             loop_forever=True,
             subselect_sql=query,
