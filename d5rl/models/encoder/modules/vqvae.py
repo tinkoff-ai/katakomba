@@ -33,10 +33,12 @@ class VQVAE(nn.Module):
         reconstruction = self.decoder(z_q_x_st)
         return reconstruction, z_e_x, z_q_x
 
-    def encode(self, input_state):
+    def encode(self, input_state, discrete_embeddings=True):
         z_e_x = self.encoder(input_state)
-        latents = self.codebook(z_e_x)
-        return latents
+        if discrete_embeddings:
+            return self.codebook(z_e_x)
+        else:
+            return z_e_x
 
 
 class VQEmbedding(nn.Module):
