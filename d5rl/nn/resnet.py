@@ -60,8 +60,8 @@ class BasicBlock(nn.Module):
 class ResNet(nn.Module):
     def __init__(self, depth, num_filters, img_channels=3, out_dim=512):
         super().__init__()
-        assert (depth - 2) % 6 == 0, "Depth should be 6n+2, e.g. 8, 20, 32, 44, 56, 110, 1202"
-        n = (depth - 2) // 6
+        assert (depth - 2) % 9 == 0, "Depth should be 9n+2, e.g. 11, 20, 29, 38, 47, 56, 110, 1199"
+        n = (depth - 2) // 9
         # TODO: maybe in the future we should add support for the Bottleneck style block,
         #  but in the original work only Basic block is used for cifar
         self.__in_channels = num_filters[0]
@@ -72,11 +72,12 @@ class ResNet(nn.Module):
         self.layer1 = self.__make_layer(BasicBlock, num_filters[1], n)
         self.layer2 = self.__make_layer(BasicBlock, num_filters[2], n, stride=2)
         self.layer3 = self.__make_layer(BasicBlock, num_filters[3], n, stride=2)
-        # TODO: we additionally can add new block to compress nethack image further (24x80 -> 3x10)
-        # self.layer4 = self.__make_layer(BasicBlock, num_filters[4], n, stride=2)
+        # this layer is an addition to the standard CIFAR type model,
+        # as we need higher downsampling for 24x80 nethack img -> 3x10
+        self.layer4 = self.__make_layer(BasicBlock, num_filters[4], n, stride=2)
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(num_filters[3], out_dim)
+        self.fc = nn.Linear(num_filters[4], out_dim)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -103,8 +104,9 @@ class ResNet(nn.Module):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
+        x = self.layer4(x)
 
-        # for 24x80 final would be 64x6x20
+        # for 24x80 final would be 64x3x10
         x = self.avgpool(x)
         x = x.flatten(1)
         x = self.fc(x)
@@ -113,34 +115,34 @@ class ResNet(nn.Module):
 
 
 # Additionally support wide variants from "Wide Residual Networks": https://arxiv.org/pdf/1605.07146.pdf
-class ResNet8(ResNet):
+class ResNet11(ResNet):
     def __init__(self, img_channels, out_dim, k=1):
-        super().__init__(8, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
+        super().__init__(11, [16, 16 * k, 32 * k, 64 * k, 128 * k], img_channels, out_dim)
 
 
 class ResNet20(ResNet):
     def __init__(self, img_channels, out_dim, k=1):
-        super().__init__(20, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
+        super().__init__(20, [16, 16 * k, 32 * k, 64 * k, 128 * k], img_channels, out_dim)
 
 
-class ResNet32(ResNet):
+class ResNet38(ResNet):
     def __init__(self, img_channels, out_dim, k=1):
-        super().__init__(32, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
+        super().__init__(38, [16, 16 * k, 32 * k, 64 * k, 128 * k], img_channels, out_dim)
 
 
 class ResNet56(ResNet):
     def __init__(self, img_channels, out_dim, k=1):
-        super().__init__(56, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
+        super().__init__(56, [16, 16 * k, 32 * k, 64 * k, 128 * k], img_channels, out_dim)
 
 
 class ResNet110(ResNet):
     def __init__(self, img_channels, out_dim, k=1):
-        super().__init__(110, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
+        super().__init__(110, [16, 16 * k, 32 * k, 64 * k, 128 * k], img_channels, out_dim)
 
 
 if __name__ == "__main__":
     test_img = torch.randn(2, 3, 24, 80)
-    model = ResNet8(3, 256, k=1)
+    model = ResNet11(3, 256, k=1)
 
     print(model(test_img).shape)
 
