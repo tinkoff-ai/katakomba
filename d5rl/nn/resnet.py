@@ -60,11 +60,10 @@ class BasicBlock(nn.Module):
 class ResNet(nn.Module):
     def __init__(self, depth, num_filters, img_channels=3, out_dim=512):
         super().__init__()
-        # TODO: maybe in the future we should add support for the Bottleneck style block,
-        #  but in the original work only Basic block is used for cifar
         assert (depth - 2) % 6 == 0, "Depth should be 6n+2, e.g. 8, 20, 32, 44, 56, 110, 1202"
         n = (depth - 2) // 6
-
+        # TODO: maybe in the future we should add support for the Bottleneck style block,
+        #  but in the original work only Basic block is used for cifar
         self.__in_channels = num_filters[0]
 
         self.conv1 = nn.Conv2d(img_channels, num_filters[0], kernel_size=3, padding=1, bias=False)
@@ -73,6 +72,8 @@ class ResNet(nn.Module):
         self.layer1 = self.__make_layer(BasicBlock, num_filters[1], n)
         self.layer2 = self.__make_layer(BasicBlock, num_filters[2], n, stride=2)
         self.layer3 = self.__make_layer(BasicBlock, num_filters[3], n, stride=2)
+        # TODO: we additionally can add new block to compress nethack image further (24x80 -> 3x10)
+        # self.layer4 = self.__make_layer(BasicBlock, num_filters[4], n, stride=2)
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(num_filters[3], out_dim)
@@ -139,7 +140,7 @@ class ResNet110(ResNet):
 
 if __name__ == "__main__":
     test_img = torch.randn(2, 3, 24, 80)
-    model = ResNet8(3, 256, k=4)
+    model = ResNet8(3, 256, k=1)
 
     print(model(test_img).shape)
 
