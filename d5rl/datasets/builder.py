@@ -75,7 +75,7 @@ class AutoAscendDatasetBuilder:
     def build(
         self,
         batch_size: int,
-        seq_length=1,
+        seq_len: int = 1,
         auto_ascend_cls=SARSAutoAscendTTYDataset,
         **kwargs,
     ) -> BaseAutoAscend:
@@ -91,7 +91,7 @@ class AutoAscendDatasetBuilder:
         self._dataset = nld.TtyrecDataset(
             dataset_name="autoascend",
             batch_size=batch_size,
-            seq_length=seq_length,
+            seq_length=seq_len,
             shuffle=True,
             loop_forever=True,
             subselect_sql=query,
@@ -99,7 +99,6 @@ class AutoAscendDatasetBuilder:
             threadpool=tp,
         )
         print(f"Total games in the filtered dataset: {len(self._dataset._gameids)}")
-
         return auto_ascend_cls(self._dataset, batch_size=batch_size, **kwargs)
 
     def _build_sql_query(self) -> Tuple[str, Tuple]:
