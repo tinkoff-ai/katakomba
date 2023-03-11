@@ -1,18 +1,21 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-# simplified version from torchvision: https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py
-# removed support for groups, dilations, wide variants, last mapping to classes
+# ResNet models for CIFAR. Adapted from
+# 1. https://github.com/elephantmipt/compressors/blob/master/compressors/models/cv/resnet_cifar.py
+# 2. https://github.com/kuangliu/pytorch-cifar/blob/master/models/resnet.py
+# 3. https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py
 
 
-def conv3x3(in_channels, out_channels, stride=1, padding=1):
+def conv3x3(in_channels, out_channels, stride=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(
         in_channels,
         out_channels,
         kernel_size=3,
         stride=stride,
-        padding=padding,
+        padding=1,
         bias=False,
     )
 
@@ -23,91 +26,56 @@ def conv1x1(in_channels, out_channels, stride=1):
 
 
 class BasicBlock(nn.Module):
-    expansion = 1
-
-    def __init__(self, in_channels, out_channels, stride=1, downsample=None):
+    def __init__(self, in_channels, hidden_channels, stride=1):
         super().__init__()
+        self.conv1 = conv3x3(in_channels, hidden_channels, stride)
+        self.bn1 = nn.BatchNorm2d(hidden_channels)
 
-        self.conv1 = conv3x3(in_channels, out_channels, stride)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = conv3x3(out_channels, out_channels)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = conv3x3(hidden_channels, hidden_channels)
+        self.bn2 = nn.BatchNorm2d(hidden_channels)
 
-        self.downsample = downsample
+        self.downsample = nn.Identity()
+        if stride != 1 or in_channels != hidden_channels:
+            self.downsample = nn.Sequential(
+                conv1x1(in_channels, hidden_channels, stride),
+                nn.BatchNorm2d(hidden_channels)
+            )
 
     def forward(self, x):
-        identity = x
-
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu(out)
+        out = F.relu(out, inplace=True)
 
         out = self.conv2(out)
         out = self.bn2(out)
 
-        if self.downsample is not None:
-            identity = self.downsample(identity)
+        residual = self.downsample(x)
 
-        out += identity
-        out = self.relu(out)
-        return out
+        out += residual
+        out = F.relu(out, inplace=True)
 
-
-class BottleneckBlock(nn.Module):
-    expansion = 4
-
-    def __init__(self, in_channels, out_channels, stride=1, downsample=None):
-        super().__init__()
-
-        self.conv1 = conv1x1(in_channels, out_channels, stride)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = conv3x3(out_channels, out_channels)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.conv3 = conv1x1(out_channels, out_channels * self.expansion)
-        self.bn3 = nn.BatchNorm2d(out_channels * self.expansion)
-        self.relu = nn.ReLU(inplace=True)
-
-        self.downsample = downsample
-
-    def forward(self, x):
-        identity = x
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-        out = self.relu(out)
-
-        out = self.conv3(out)
-        out = self.bn3(out)
-
-        if self.downsample is not None:
-            identity = self.downsample(identity)
-
-        out += identity
-        out = self.relu(out)
         return out
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, blocks, img_channels=3):
+    def __init__(self, depth, num_filters, img_channels=3, out_dim=512):
         super().__init__()
-        self._in_channels = 64
+        # TODO: maybe in the future we should add support for the Bottleneck style block,
+        #  but in the original work only Basic block is used for cifar
+        assert (depth - 2) % 6 == 0, "Depth should be 6n+2, e.g. 8, 20, 32, 44, 56, 110, 1202"
+        n = (depth - 2) // 6
 
-        self.conv1 = nn.Conv2d(img_channels, self._in_channels, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1 = nn.BatchNorm2d(self._in_channels)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.__in_channels = num_filters[0]
 
-        self.layer1 = self.__make_layer(block, 64, blocks[0])
-        self.layer2 = self.__make_layer(block, 128, blocks[1], stride=2)
-        self.layer3 = self.__make_layer(block, 256, blocks[2], stride=2)
-        self.layer4 = self.__make_layer(block, 512, blocks[3], stride=2)
+        self.conv1 = nn.Conv2d(img_channels, num_filters[0], kernel_size=3, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(num_filters[0])
+
+        self.layer1 = self.__make_layer(BasicBlock, num_filters[1], n)
+        self.layer2 = self.__make_layer(BasicBlock, num_filters[2], n, stride=2)
+        self.layer3 = self.__make_layer(BasicBlock, num_filters[3], n, stride=2)
 
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(num_filters[3], out_dim)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -117,63 +85,64 @@ class ResNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def __make_layer(self, block, hidden_channels, blocks, stride=1):
-        downsample = None
-        if stride != 1 or self._in_channels != hidden_channels * block.expansion:
-            downsample = nn.Sequential(
-                conv1x1(self._in_channels, hidden_channels * block.expansion, stride),
-                nn.BatchNorm2d(hidden_channels * block.expansion)
-            )
+        layers = [
+            block(self.__in_channels, hidden_channels, stride)
+        ]
+        self.__in_channels = hidden_channels
+        for i in range(1, blocks):
+            layers.append(block(self.__in_channels, hidden_channels))
 
-        layers = []
-        layers.append(
-            block(self._in_channels, hidden_channels, stride, downsample)
-        )
-        self._in_channels = hidden_channels * block.expansion
-
-        for _ in range(1, blocks):
-            layers.append(
-                block(self._in_channels, hidden_channels)
-            )
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        # now sure that we really need first conv with filter size 7 + maxpool
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.maxpool(out)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = F.relu(x, inplace=True)
 
-        out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.layer4(out)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
 
-        out = self.avgpool(out)
-        out = torch.flatten(out, 1)
+        # for 24x80 final would be 64x6x20
+        x = self.avgpool(x)
+        x = x.flatten(1)
+        x = self.fc(x)
 
-        return out
-
-
-class ResNet18(ResNet):
-    def __init__(self, img_channels=3):
-        super().__init__(BasicBlock, [2, 2, 2, 2], img_channels=img_channels)
+        return x
 
 
-class ResNet34(ResNet):
-    def __init__(self, img_channels=3):
-        super().__init__(BasicBlock, [3, 4, 6, 3], img_channels=img_channels)
+# Additionally support wide variants from "Wide Residual Networks": https://arxiv.org/pdf/1605.07146.pdf
+class ResNet8(ResNet):
+    def __init__(self, img_channels, out_dim, k=1):
+        super().__init__(8, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
 
 
-class ResNet50(ResNet):
-    def __init__(self, img_channels=3):
-        super().__init__(BottleneckBlock, [3, 4, 6, 3], img_channels=img_channels)
+class ResNet20(ResNet):
+    def __init__(self, img_channels, out_dim, k=1):
+        super().__init__(20, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
 
 
-class ResNet101(ResNet):
-    def __init__(self, img_channels=3):
-        super().__init__(BottleneckBlock, [3, 4, 23, 3], img_channels=img_channels)
+class ResNet32(ResNet):
+    def __init__(self, img_channels, out_dim, k=1):
+        super().__init__(32, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
 
 
-class ResNet152(ResNet):
-    def __init__(self, img_channels=3):
-        super().__init__(BottleneckBlock, [3, 8, 36, 3], img_channels=img_channels)
+class ResNet56(ResNet):
+    def __init__(self, img_channels, out_dim, k=1):
+        super().__init__(56, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
+
+
+class ResNet110(ResNet):
+    def __init__(self, img_channels, out_dim, k=1):
+        super().__init__(110, [16, 16 * k, 32 * k, 64 * k], img_channels, out_dim)
+
+
+if __name__ == "__main__":
+    test_img = torch.randn(2, 3, 24, 80)
+    model = ResNet8(3, 256, k=4)
+
+    print(model(test_img).shape)
+
+
+
+
