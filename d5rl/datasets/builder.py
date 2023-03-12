@@ -73,7 +73,12 @@ class AutoAscendDatasetBuilder:
         return self
 
     def build(
-        self, batch_size: int, auto_ascend_cls=SARSAutoAscendTTYDataset, **kwargs
+        self,
+        batch_size: int,
+        seq_len: int = 1,
+        n_workers: int = 32,
+        auto_ascend_cls=SARSAutoAscendTTYDataset,
+        **kwargs,
     ) -> BaseAutoAscend:
         """
         Args:
@@ -83,11 +88,11 @@ class AutoAscendDatasetBuilder:
         # Build a sql query to select only filtered ones
         query, query_args = self._build_sql_query()
 
-        tp = ThreadPoolExecutor(max_workers=32)
+        tp = ThreadPoolExecutor(max_workers=n_workers)
         self._dataset = nld.TtyrecDataset(
             dataset_name="autoascend",
             batch_size=batch_size,
-            seq_length=1,
+            seq_length=seq_len,
             shuffle=True,
             loop_forever=True,
             subselect_sql=query,
@@ -95,7 +100,6 @@ class AutoAscendDatasetBuilder:
             threadpool=tp,
         )
         print(f"Total games in the filtered dataset: {len(self._dataset._gameids)}")
-
         return auto_ascend_cls(self._dataset, batch_size=batch_size, **kwargs)
 
     def _build_sql_query(self) -> Tuple[str, Tuple]:

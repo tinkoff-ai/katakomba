@@ -48,14 +48,11 @@ def ascii_action_to_gym_action(ascii_action: int) -> int:
 def ascii_actions_to_gym_actions(ascii_actions: np.ndarray) -> np.ndarray:
     """
     Args
-      ascii_actions: [batch_size, 1]
+      ascii_actions: any size
     Returns
-      gym_actions: [batch_size, 1]
+      gym_actions: any size
     """
-    gym_actions = np.empty_like(ascii_actions)
-    for b in range(gym_actions.shape[0]):
-        gym_actions[b, 0] = _ASCII_TO_GYM_ACTION[ascii_actions[b, 0]]
-    return gym_actions
+    return np.vectorize(ascii_action_to_gym_action)(ascii_actions)
 
 
 def yes_nle_action():
