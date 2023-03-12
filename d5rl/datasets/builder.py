@@ -76,6 +76,7 @@ class AutoAscendDatasetBuilder:
         self,
         batch_size: int,
         seq_len: int = 1,
+        n_workers: int = 32,
         auto_ascend_cls=SARSAutoAscendTTYDataset,
         **kwargs,
     ) -> BaseAutoAscend:
@@ -87,7 +88,7 @@ class AutoAscendDatasetBuilder:
         # Build a sql query to select only filtered ones
         query, query_args = self._build_sql_query()
 
-        tp = ThreadPoolExecutor(max_workers=32)
+        tp = ThreadPoolExecutor(max_workers=n_workers)
         self._dataset = nld.TtyrecDataset(
             dataset_name="autoascend",
             batch_size=batch_size,
