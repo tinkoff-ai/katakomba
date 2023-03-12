@@ -21,7 +21,7 @@ class _SARSAutoAscendTTYIterator:
     def __iter__(self):
         # A note: I provided how the sequences look like below (+3 is an example)
         # so it's easier to understand what's happening with the alignment
-        cur_batch = deepcopy(self._convert_batch(next(self._ttyrecdata)))
+        cur_batch = self._convert_batch(next(self._ttyrecdata))
         while True:
             # [s_n, s_n+1, s_n+2, s_n+3]
             # [a_n, a_n+1, a_n+2, a_n+3]
@@ -41,9 +41,9 @@ class _SARSAutoAscendTTYIterator:
             # [r_n, r_n+1, r_n+2, r_n+3]
             # [d_n, d_n+1, d_n+2, d_n+3]
             # [s_n+1, s_n+2, s_n+3, s_n+4]
-            next_batch = deepcopy(self._convert_batch(next(self._ttyrecdata)))
-            rewards[:, -1] = next_batch[2][:, -1]
-            dones[:, -1] = next_batch[3][:, -1]
+            next_batch = self._convert_batch(next(self._ttyrecdata))
+            rewards[:, -1] = next_batch[2][:, 0]
+            dones[:, -1] = next_batch[3][:, 0]
             next_states[:, -1] = next_batch[0][:, 0]
 
             # Move on
@@ -68,10 +68,10 @@ class _SARSAutoAscendTTYIterator:
         actions = ascii_actions_to_gym_actions(batch["keypresses"])
 
         # [batch_size, seq_len]
-        rewards = batch["scores"]
+        rewards = deepcopy(batch["scores"])
 
         # [batch_size, seq_len]
-        dones = batch["done"]
+        dones = deepcopy(batch["done"])
 
         return states, actions, rewards, dones
 
