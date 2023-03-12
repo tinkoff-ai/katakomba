@@ -36,7 +36,7 @@ class _SARSAutoAscendTTYIterator:
             rewards = np.roll(rewards, shift=-1, axis=1)
             dones = np.roll(dones, shift=-1, axis=1)
             next_states = np.roll(deepcopy(states), shift=-1, axis=1)
-            
+
             # Replace the last element using the information from the next batch
             # [r_n, r_n+1, r_n+2, r_n+3]
             # [d_n, d_n+1, d_n+2, d_n+3]
@@ -65,9 +65,7 @@ class _SARSAutoAscendTTYIterator:
         )
 
         # [batch_size, seq_len]
-        actions = ascii_actions_to_gym_actions(
-            batch["keypresses"]
-        )
+        actions = ascii_actions_to_gym_actions(batch["keypresses"])
 
         # [batch_size, seq_len]
         rewards = batch["scores"]
@@ -80,6 +78,4 @@ class _SARSAutoAscendTTYIterator:
 
 class SARSAutoAscendTTYDataset(BaseAutoAscend):
     def __init__(self, ttyrecdata: TtyrecDataset, batch_size: int):
-        super().__init__(
-            _SARSAutoAscendTTYIterator, ttyrecdata, batch_size
-        )
+        super().__init__(_SARSAutoAscendTTYIterator, ttyrecdata, batch_size)

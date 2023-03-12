@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 
 from d5rl.tasks import make_task_builder
 from d5rl.utils.roles import Alignment, Race, Role, Sex
-    
+
 
 """
 Task Builder.

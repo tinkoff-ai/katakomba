@@ -17,7 +17,8 @@ def tty_to_numpy(tty_chars, tty_colors, tty_cursor) -> np.ndarray:
     seq_len = tty_chars.shape[1]
 
     obs = np.zeros(
-        shape=(batch_size, seq_len, TERMINAL_SHAPE[0], TERMINAL_SHAPE[1], 3), dtype=np.uint8
+        shape=(batch_size, seq_len, TERMINAL_SHAPE[0], TERMINAL_SHAPE[1], 3),
+        dtype=np.uint8,
     )
 
     obs[:, :, :, :, 0] = tty_chars
