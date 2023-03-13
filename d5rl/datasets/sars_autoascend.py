@@ -64,6 +64,7 @@ class _SARSAutoAscendTTYIterator:
             tty_colors=batch["tty_colors"],
             tty_cursor=batch["tty_cursor"],
         )
+
         # [batch_size, seq_len]
         actions = ascii_actions_to_gym_actions(batch["keypresses"])
 

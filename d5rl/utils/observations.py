@@ -20,6 +20,7 @@ def tty_to_numpy(tty_chars, tty_colors, tty_cursor) -> np.ndarray:
         shape=(batch_size, seq_len, TERMINAL_SHAPE[0], TERMINAL_SHAPE[1], 3),
         dtype=np.uint8,
     )
+
     obs[:, :, :, :, 0] = tty_chars
     obs[:, :, :, :, 1] = tty_colors
 

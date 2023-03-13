@@ -54,6 +54,7 @@ class NetHackEnvBuilder:
         """
         An iterator over the NLE settings to evaluate against.
         """
+
         all_valid_combinations = deepcopy(ALLOWED_COMBOS)
         valid_combinations = set()
 
