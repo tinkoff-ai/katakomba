@@ -1,6 +1,9 @@
 import pyrallis
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
+import random
+import wandb
+import gym
 import sys
 import os
 import uuid
@@ -9,11 +12,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from collections import defaultdict
 from torch.distributions import Categorical
 import numpy as np
 
 from typing import Optional, Tuple
-from d5rl.tasks import NetHackEnvBuilder, make_task_builder
+from d5rl.tasks import make_task_builder
 from d5rl.utils.roles import Alignment, Race, Role, Sex
 from d5rl.nn.resnet import ResNet11, ResNet20, ResNet38, ResNet56, ResNet110
 
@@ -41,7 +45,7 @@ class TrainConfig:
     clip_grad: Optional[float] = None
     checkpoints_path: Optional[str] = None
     eval_every: int = 1000
-    eval_episodes: int = 10
+    eval_episodes_per_seed: int = 10
     eval_seeds: Tuple[int] = (228, 1337, 1307, 2, 10000)
     train_seed: int = 42
 
@@ -50,6 +54,13 @@ class TrainConfig:
         self.name = f"{self.group}-{str(uuid.uuid4())[:8]}"
         if self.checkpoints_path is not None:
             self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
+
+
+def set_seed(seed: int):
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
 
 
 class Actor(nn.Module):
@@ -83,11 +94,58 @@ class Actor(nn.Module):
         return torch.argmax(logits).cpu().item(), new_state
 
 
+@torch.no_grad()
+def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
+    actor.eval()
+    eval_stats = defaultdict(dict)
+
+    for (character, env, seed) in env_builder.evaluate():
+        episodes_rewards = []
+        for _ in range(episodes_per_seed):
+            env.seed(seed, reseed=False)
+
+            obs, done, episode_reward = env.reset(), False, 0.0
+            rnn_state = None
+
+            while not done:
+                action, rnn_state = actor.act(obs, rnn_state, device=device)
+                obs, reward, done, _ = env.step(action)
+                episode_reward += reward
+            episodes_rewards.append(episode_reward)
+
+        eval_stats[character][seed] = np.mean(episodes_rewards)
+
+    actor.train()
+    return eval_stats
+
+
 @pyrallis.wrap()
 def train(config: TrainConfig):
-    env_builder, dataset_builder = make_task_builder(config.env)
+    saved_config = asdict(config)
+    saved_config["mlc_job_name"] = os.environ.get("PLATFORM_JOB_NAME")
+    wandb.init(
+        config=saved_config,
+        project=config.project,
+        group=config.group,
+        name=config.name,
+        id=str(uuid.uuid4()),
+        save_code=True
+    )
+    if config.checkpoints_path is not None:
+        print(f"Checkpoints path: {config.checkpoints_path}")
+        os.makedirs(config.checkpoints_path, exist_ok=True)
+        with open(os.path.join(config.checkpoints_path, "config.yaml"), "w") as f:
+            pyrallis.dump(config, f)
 
-    env_builder = env_builder.eval_seeds(config.eval_seeds)
+    set_seed(config.train_seed)
+    env_builder, dataset_builder = make_task_builder(config.env)
+    env_builder = (
+        env_builder.roles([Role.MONK])
+        .races([Race.HUMAN])
+        .alignments([Alignment.NEUTRAL])
+        .sex([Sex.MALE])
+        .eval_seeds(list(config.eval_seeds))
+    )
     dataset = dataset_builder.build(
         batch_size=config.batch_size,
         seq_len=config.seq_len
@@ -98,7 +156,7 @@ def train(config: TrainConfig):
         hidden_dim=config.hidden_dim,
         lstm_layers=config.lstm_layers,
         width_k=config.width_k
-    )
+    ).to(DEVICE)
     optim = torch.optim.AdamW(actor.parameters(), lr=config.learning_rate)
 
     loader = DataLoader(
@@ -129,7 +187,19 @@ def train(config: TrainConfig):
             torch.nn.utils.clip_grad_norm(actor.parameters(), config.clip_grad)
         optim.step()
 
-        print(loss)
+        wandb.log({
+            "loss": loss.detach().item()
+        }, step=idx)
+
+        if (idx + 1) % config.eval_every == 0:
+            eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
+            wandb.log(eval_stats, step=idx)
+
+            if config.checkpoints_path is not None:
+                torch.save(
+                    actor.state_dict(),
+                    os.path.join(config.checkpoints_path, f"{idx}.pt"),
+                )
 
 
 if __name__ == "__main__":
