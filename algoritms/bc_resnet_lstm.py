@@ -157,7 +157,10 @@ def train(config: TrainConfig):
         lstm_layers=config.lstm_layers,
         width_k=config.width_k
     ).to(DEVICE)
-    optim = torch.optim.AdamW(actor.parameters(), lr=config.learning_rate)
+    optim = torch.optim.AdamW(
+        actor.parameters(),
+        lr=config.learning_rate
+    )
 
     loader = DataLoader(
         dataset=dataset,

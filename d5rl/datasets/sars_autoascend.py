@@ -33,7 +33,7 @@ class _SARSAutoAscendTTYIterator:
             # [r_n, r_n+1, r_n+2, r_n-1]
             # [d_n, d_n+1, d_n+2, d_n-1]
             # [s_n+1, s_n+2, s_n+3, s_n]
-            # TODO: gigantic overhead over original loader, somehow we need to optimimze this!
+            # TODO: gigantic 4x overhead over original loader, somehow we need to optimimze this!
             rewards = np.roll(rewards, shift=-1, axis=1)
             dones = np.roll(dones, shift=-1, axis=1)
             next_states = np.roll(deepcopy(states), shift=-1, axis=1)
