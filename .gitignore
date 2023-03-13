@@ -1,8 +1,13 @@
 # Data
 data/
 ttyrecs.db
+
+# Misc
 test.py
 test.ipynb
+.ml-job-preset.yml
+mlc_run.sh
+wandb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

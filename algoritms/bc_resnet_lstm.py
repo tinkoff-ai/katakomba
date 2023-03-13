@@ -3,15 +3,14 @@ from dataclasses import dataclass, asdict
 
 import random
 import wandb
-import gym
 import sys
 import os
 import uuid
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from tqdm import tqdm, trange
 from collections import defaultdict
 from torch.distributions import Categorical
 import numpy as np
@@ -38,9 +37,9 @@ class TrainConfig:
     hidden_dim: int = 512
     width_k: int = 1
     # Training
-    update_steps: int = 100_000
+    update_steps: int = 200_000
     batch_size: int = 256
-    seq_len: int = 64
+    seq_len: int = 32
     learning_rate: float = 3e-4
     clip_grad: Optional[float] = None
     checkpoints_path: Optional[str] = None
@@ -74,6 +73,7 @@ class Actor(nn.Module):
             num_layers=lstm_layers,
             batch_first=True
         )
+        # TODO: ortho/chrono init for the lstm
         self.head = nn.Linear(hidden_dim, action_dim)
 
     def forward(self, obs, state=None):
@@ -89,8 +89,8 @@ class Actor(nn.Module):
     @torch.no_grad()
     def act(self, obs, state=None, device="cpu"):
         assert obs.ndim == 3, "act only for single obs"
-        obs = torch.tensor(state[None, None, ...], device=device, dtype=torch.float32)
-        logits, new_state = self(obs, state)
+        obs = torch.tensor(obs, device=device, dtype=torch.float32).permute(2, 0, 1)
+        logits, new_state = self(obs[None, None, ...], state)
         return torch.argmax(logits).cpu().item(), new_state
 
 
@@ -101,7 +101,7 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
 
     for (character, env, seed) in env_builder.evaluate():
         episodes_rewards = []
-        for _ in range(episodes_per_seed):
+        for _ in trange(episodes_per_seed, desc="One seed evaluation", leave=False):
             env.seed(seed, reseed=False)
 
             obs, done, episode_reward = env.reset(), False, 0.0
@@ -167,11 +167,10 @@ def train(config: TrainConfig):
     )
 
     rnn_state = None
-    for idx, batch in enumerate(loader):
-        if idx >= config.update_steps:
-            break
+    loader_iter = iter(loader)
+    for idx in trange(config.update_steps, desc="Training"):
+        states, actions, *_ = next(loader_iter)
 
-        states, actions, *_ = batch
         logits, rnn_state = actor(
             states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
             state=rnn_state
