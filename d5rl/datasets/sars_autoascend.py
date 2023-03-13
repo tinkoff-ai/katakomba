@@ -22,6 +22,7 @@ class _SARSAutoAscendTTYIterator:
         # A note: I provided how the sequences look like below (+3 is an example)
         # so it's easier to understand what's happening with the alignment
         cur_batch = self._convert_batch(next(self._ttyrecdata))
+        prev_action = np.zeros_like(cur_batch[1][:, 0])
         while True:
             # [s_n, s_n+1, s_n+2, s_n+3]
             # [a_n, a_n+1, a_n+2, a_n+3]
@@ -46,15 +47,22 @@ class _SARSAutoAscendTTYIterator:
             dones[:, -1] = next_batch[3][:, 0]
             next_states[:, -1] = next_batch[0][:, 0]
 
+            # Alignment for previous actions
+            # [a_n, a_n+1, a_n+2, a_n+3] -> [a_n+3, a_n, a_n+1, a_n+2] -> [a_n-1, a_n, a_n+1, a_n+2]
+            prev_actions = np.roll(actions, shift=1, axis=1)
+            prev_actions[:, 0] = prev_action
+
             # Move on
             cur_batch = next_batch
+            prev_action = actions[:, -1]
 
             # states: [batch_size, seq_len, 24, 80, 3]
             # actions: [batch_size, seq_len]
             # rewards: [batch_size, seq_len]
             # dones: [batch_size, seq_len]
             # next_states: [batch_size, seq_len, 24, 80, 3]
-            yield states, actions, rewards, dones, next_states
+            # prev_actions: [batch_size, seq_len]
+            yield states, actions, rewards, dones, next_states, prev_actions
 
     def _convert_batch(self, batch):
         # [batch_size, seq_len, 24, 80, 3]
