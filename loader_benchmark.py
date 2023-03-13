@@ -7,7 +7,7 @@ from d5rl.tasks import make_task_builder
 NUM_BATCHES = 10
 BATCH_SIZE = 256
 SEQ_LEN = 1000
-DEVICE = "cuda"
+DEVICE = "cpu"
 
 env_builder, dataset_builder = make_task_builder("NetHackScore-v0-tty-bot-v0")
 
@@ -22,7 +22,7 @@ loader = DataLoader(
 
 start = time.time()
 for ind, batch in enumerate(loader):
-    states, actions, rewards, dones, next_states = batch
+    states, actions, rewards, dones, next_states, prev_actions = batch
     states.to(DEVICE)
     actions.to(DEVICE)
     rewards.to(DEVICE)
