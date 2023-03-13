@@ -59,9 +59,9 @@ class _SARSAutoAscendTTYIterator:
     def _convert_batch(self, batch):
         # [batch_size, seq_len, 24, 80, 3]
         states = tty_to_numpy(
-            tty_chars=batch["tty_chars"].squeeze(),
-            tty_colors=batch["tty_colors"].squeeze(),
-            tty_cursor=batch["tty_cursor"].squeeze(),
+            tty_chars=batch["tty_chars"],
+            tty_colors=batch["tty_colors"],
+            tty_cursor=batch["tty_cursor"],
         )
 
         # [batch_size, seq_len]
