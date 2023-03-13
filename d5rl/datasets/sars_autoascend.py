@@ -33,6 +33,7 @@ class _SARSAutoAscendTTYIterator:
             # [r_n, r_n+1, r_n+2, r_n-1]
             # [d_n, d_n+1, d_n+2, d_n-1]
             # [s_n+1, s_n+2, s_n+3, s_n]
+            # TODO: gigantic overhead over original loader, somehow we need to optimimze this!
             rewards = np.roll(rewards, shift=-1, axis=1)
             dones = np.roll(dones, shift=-1, axis=1)
             next_states = np.roll(deepcopy(states), shift=-1, axis=1)
@@ -59,11 +60,10 @@ class _SARSAutoAscendTTYIterator:
     def _convert_batch(self, batch):
         # [batch_size, seq_len, 24, 80, 3]
         states = tty_to_numpy(
-            tty_chars=batch["tty_chars"].squeeze(),
-            tty_colors=batch["tty_colors"].squeeze(),
-            tty_cursor=batch["tty_cursor"].squeeze(),
+            tty_chars=batch["tty_chars"],
+            tty_colors=batch["tty_colors"],
+            tty_cursor=batch["tty_cursor"],
         )
-
         # [batch_size, seq_len]
         actions = ascii_actions_to_gym_actions(batch["keypresses"])
 

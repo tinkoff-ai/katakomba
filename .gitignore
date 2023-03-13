@@ -1,6 +1,8 @@
 # Data
 data/
 ttyrecs.db
+test.py
+test.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
