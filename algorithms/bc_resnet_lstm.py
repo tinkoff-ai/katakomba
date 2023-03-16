@@ -1,6 +1,7 @@
 import pyrallis
 from dataclasses import dataclass, asdict
 
+import time
 import random
 import wandb
 import sys
@@ -10,7 +11,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from tqdm import tqdm, trange
+from tqdm.auto import tqdm, trange
 from collections import defaultdict
 from torch.distributions import Categorical
 import numpy as np
@@ -21,6 +22,24 @@ from d5rl.utils.roles import Alignment, Race, Role, Sex
 from d5rl.nn.resnet import ResNet11, ResNet20, ResNet38, ResNet56, ResNet110
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+# TODO:
+#   1. SGD instead of adam for resnet
+#   2. label smoothing for cross entropy loss
+class timeit:
+    def __enter__(self):
+        self.start_gpu = torch.cuda.Event(enable_timing=True)
+        self.end_gpu = torch.cuda.Event(enable_timing=True)
+        self.start_cpu = time.time()
+        self.start_gpu.record()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.end_gpu.record()
+        torch.cuda.synchronize()
+        self.elapsed_time_gpu = self.start_gpu.elapsed_time(self.end_gpu) / 1000
+        self.elapsed_time_cpu = time.time() - self.start_cpu
 
 
 @dataclass
@@ -37,13 +56,14 @@ class TrainConfig:
     hidden_dim: int = 512
     width_k: int = 1
     # Training
-    update_steps: int = 200_000
-    batch_size: int = 256
+    update_steps: int = 90_000
+    batch_size: int = 64
     seq_len: int = 32
+    n_workers: int = 8
     learning_rate: float = 3e-4
     clip_grad: Optional[float] = None
     checkpoints_path: Optional[str] = None
-    eval_every: int = 1000
+    eval_every: int = 100_000
     eval_episodes_per_seed: int = 10
     eval_seeds: Tuple[int] = (228, 1337, 1307, 2, 10000)
     train_seed: int = 42
@@ -121,6 +141,7 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
 
 @pyrallis.wrap()
 def train(config: TrainConfig):
+    print(f"Device: {DEVICE}")
     saved_config = asdict(config)
     saved_config["mlc_job_name"] = os.environ.get("PLATFORM_JOB_NAME")
     wandb.init(
@@ -148,7 +169,8 @@ def train(config: TrainConfig):
     )
     dataset = dataset_builder.build(
         batch_size=config.batch_size,
-        seq_len=config.seq_len
+        seq_len=config.seq_len,
+        n_workers=config.n_workers
     )
     actor = Actor(
         resnet_type=config.resnet_type,
@@ -157,9 +179,10 @@ def train(config: TrainConfig):
         lstm_layers=config.lstm_layers,
         width_k=config.width_k
     ).to(DEVICE)
+
     optim = torch.optim.AdamW(
         actor.parameters(),
-        lr=config.learning_rate
+        lr=config.learning_rate,
     )
 
     loader = DataLoader(
@@ -167,41 +190,54 @@ def train(config: TrainConfig):
         # Disable automatic batching
         batch_sampler=None,
         batch_size=None,
+        pin_memory=True
     )
 
     rnn_state = None
     loader_iter = iter(loader)
-    for idx in trange(config.update_steps, desc="Training"):
-        states, actions, *_ = next(loader_iter)
+    for step in trange(config.update_steps, desc="Training"):
+        with timeit() as timer:
+            states, actions, *_ = next(loader_iter)
 
-        logits, rnn_state = actor(
-            states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
-            state=rnn_state
-        )
-        rnn_state = [a.detach() for a in rnn_state]
+        wandb.log({
+            "times/batch_loading_cpu": timer.elapsed_time_cpu,
+            "times/batch_loading_gpu": timer.elapsed_time_gpu
+        }, step=step)
 
-        dist = Categorical(logits=logits)
-        loss = -dist.log_prob(actions.to(DEVICE)).mean()
+        with timeit() as timer:
+            logits, rnn_state = actor(
+                states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
+                state=rnn_state
+            )
+            rnn_state = [a.detach() for a in rnn_state]
 
-        optim.zero_grad()
-        loss.backward()
-        if config.clip_grad is not None:
-            torch.nn.utils.clip_grad_norm(actor.parameters(), config.clip_grad)
-        optim.step()
+            dist = Categorical(logits=logits)
+            loss = -dist.log_prob(actions.to(DEVICE)).mean()
+
+        wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
+
+        with timeit() as timer:
+            optim.zero_grad(set_to_none=True)
+            loss.backward()
+            if config.clip_grad is not None:
+                torch.nn.utils.clip_grad_norm(actor.parameters(), config.clip_grad)
+            optim.step()
+
+        wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
 
         wandb.log({
             "loss": loss.detach().item()
-        }, step=idx)
+        }, step=step)
 
-        if (idx + 1) % config.eval_every == 0:
-            eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
-            wandb.log(eval_stats, step=idx)
-
-            if config.checkpoints_path is not None:
-                torch.save(
-                    actor.state_dict(),
-                    os.path.join(config.checkpoints_path, f"{idx}.pt"),
-                )
+        # if (step + 1) % config.eval_every == 0:
+        #     eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
+        #     wandb.log(eval_stats, step=step)
+        #
+        #     if config.checkpoints_path is not None:
+        #         torch.save(
+        #             actor.state_dict(),
+        #             os.path.join(config.checkpoints_path, f"{step}.pt"),
+        #         )
 
 
 if __name__ == "__main__":

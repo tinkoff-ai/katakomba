@@ -4,14 +4,15 @@ from torch.utils.data import DataLoader
 
 from d5rl.tasks import make_task_builder
 
-NUM_BATCHES = 10
-BATCH_SIZE = 256
-SEQ_LEN = 1000
-DEVICE = "cuda"
+NUM_BATCHES = 50
+BATCH_SIZE = 128
+SEQ_LEN = 512
+N_WORKERS = 10
+DEVICE = "cpu"
 
-env_builder, dataset_builder = make_task_builder("NetHackScore-v0-tty-bot-v0")
+env_builder, dataset_builder = make_task_builder("NetHackScore-v0-tty-bot-v0", data_path="../nethack/nle_data")
 
-dataset = dataset_builder.build(batch_size=BATCH_SIZE, seq_len=SEQ_LEN)
+dataset = dataset_builder.build(batch_size=BATCH_SIZE, seq_len=SEQ_LEN, n_workers=N_WORKERS)
 
 loader = DataLoader(
     dataset=dataset,
@@ -38,3 +39,4 @@ print(
 )
 print(f"1 batch takes around {elapsed / NUM_BATCHES} seconds.")
 print(f"Total frames fetched: {NUM_BATCHES * BATCH_SIZE * SEQ_LEN}")
+print(f"Frames / s: {NUM_BATCHES * BATCH_SIZE * SEQ_LEN / elapsed}")
