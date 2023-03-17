@@ -7,7 +7,7 @@ from d5rl.tasks import make_task_builder
 NUM_BATCHES = 50
 BATCH_SIZE = 128
 SEQ_LEN = 512
-N_WORKERS = 10
+N_WORKERS = 8
 DEVICE = "cpu"
 
 env_builder, dataset_builder = make_task_builder("NetHackScore-v0-tty-bot-v0", data_path="../nethack/nle_data")

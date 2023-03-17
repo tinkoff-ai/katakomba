@@ -45,6 +45,8 @@ class timeit:
 @dataclass
 class TrainConfig:
     env: str = "NetHackScore-v0-tty-bot-v0"
+    data_path: str = "data/nle_data"
+    db_path: str = "ttyrecs.db"
     # Wandb logging
     project: str = "NeuralNetHack"
     group: str = "DummyBC"
@@ -52,13 +54,13 @@ class TrainConfig:
     version: str = "v0"
     # Model
     resnet_type: str = "ResNet11"
-    lstm_layers: int = 2
-    hidden_dim: int = 512
+    lstm_layers: int = 1
+    hidden_dim: int = 1024
     width_k: int = 1
     # Training
     update_steps: int = 90_000
-    batch_size: int = 64
-    seq_len: int = 32
+    batch_size: int = 256
+    seq_len: int = 64
     n_workers: int = 8
     learning_rate: float = 3e-4
     clip_grad: Optional[float] = None
@@ -159,7 +161,11 @@ def train(config: TrainConfig):
             pyrallis.dump(config, f)
 
     set_seed(config.train_seed)
-    env_builder, dataset_builder = make_task_builder(config.env)
+    env_builder, dataset_builder = make_task_builder(
+        config.env,
+        data_path=config.data_path,
+        db_path=config.db_path
+    )
     env_builder = (
         env_builder.roles([Role.MONK])
         .races([Race.HUMAN])
@@ -179,6 +185,7 @@ def train(config: TrainConfig):
         lstm_layers=config.lstm_layers,
         width_k=config.width_k
     ).to(DEVICE)
+    print("Number of parameters:",  sum(p.numel() for p in actor.parameters()))
 
     optim = torch.optim.AdamW(
         actor.parameters(),
