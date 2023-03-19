@@ -25,8 +25,10 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 # TODO:
-#   1. SGD instead of adam for resnet
-#   2. label smoothing for cross entropy loss
+#   1. implement filtering of params for the weight decay groups
+#   2. oncycle rl scheduler
+#   3. ...
+#   4. label smoothing for cross entropy loss
 class timeit:
     def __enter__(self):
         self.start_gpu = torch.cuda.Event(enable_timing=True)
@@ -55,18 +57,18 @@ class TrainConfig:
     # Model
     resnet_type: str = "ResNet11"
     lstm_layers: int = 1
-    hidden_dim: int = 1024
+    hidden_dim: int = 2048
     width_k: int = 1
     # Training
-    update_steps: int = 90_000
+    update_steps: int = 91552
     batch_size: int = 256
     seq_len: int = 64
     n_workers: int = 8
     learning_rate: float = 3e-4
-    clip_grad: Optional[float] = None
+    clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
-    eval_every: int = 100_000
-    eval_episodes_per_seed: int = 10
+    eval_every: int = 10_000
+    eval_episodes_per_seed: int = 50
     eval_seeds: Tuple[int] = (228, 1337, 1307, 2, 10000)
     train_seed: int = 42
 
@@ -199,6 +201,7 @@ def train(config: TrainConfig):
         batch_size=None,
         pin_memory=True
     )
+    scaler = torch.cuda.amp.GradScaler()
 
     rnn_state = None
     loader_iter = iter(loader)
@@ -212,23 +215,28 @@ def train(config: TrainConfig):
         }, step=step)
 
         with timeit() as timer:
-            logits, rnn_state = actor(
-                states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
-                state=rnn_state
-            )
-            rnn_state = [a.detach() for a in rnn_state]
+            with torch.cuda.amp.autocast():
+                logits, rnn_state = actor(
+                    states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
+                    state=rnn_state
+                )
+                rnn_state = [a.detach() for a in rnn_state]
 
-            dist = Categorical(logits=logits)
-            loss = -dist.log_prob(actions.to(DEVICE)).mean()
+                dist = Categorical(logits=logits)
+                loss = -dist.log_prob(actions.to(DEVICE)).mean()
 
         wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
 
         with timeit() as timer:
+            scaler.scale(loss).backward()
+            # loss.backward()
+            if config.clip_grad_norm is not None:
+                scaler.unscale_(optim)
+                torch.nn.utils.clip_grad_norm(actor.parameters(), config.clip_grad_norm)
+            # optim.step()
+            scaler.step(optim)
+            scaler.update()
             optim.zero_grad(set_to_none=True)
-            loss.backward()
-            if config.clip_grad is not None:
-                torch.nn.utils.clip_grad_norm(actor.parameters(), config.clip_grad)
-            optim.step()
 
         wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
 
@@ -236,15 +244,15 @@ def train(config: TrainConfig):
             "loss": loss.detach().item()
         }, step=step)
 
-        # if (step + 1) % config.eval_every == 0:
-        #     eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
-        #     wandb.log(eval_stats, step=step)
-        #
-        #     if config.checkpoints_path is not None:
-        #         torch.save(
-        #             actor.state_dict(),
-        #             os.path.join(config.checkpoints_path, f"{step}.pt"),
-        #         )
+        if (step + 1) % config.eval_every == 0:
+            eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
+            wandb.log(eval_stats, step=step)
+
+            if config.checkpoints_path is not None:
+                torch.save(
+                    actor.state_dict(),
+                    os.path.join(config.checkpoints_path, f"{step}.pt"),
+                )
 
 
 if __name__ == "__main__":
