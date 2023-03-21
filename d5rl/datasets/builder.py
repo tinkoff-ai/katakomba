@@ -37,10 +37,7 @@ class AutoAscendDatasetBuilder:
         logging.info(
             f"AutoAscend Dataset has {nld.db.count_games('autoascend', conn=db_conn)} games."
         )
-<<<<<<< HEAD
-=======
-
->>>>>>> main
+        
         self.db_path = db_path
         # Pre-init filters
         # Note that all strings are further converted to be first-letter-capitalized

@@ -4,19 +4,11 @@ from torch.utils.data import DataLoader
 
 from d5rl.tasks import make_task_builder
 
-<<<<<<< HEAD
 NUM_BATCHES = 50
 BATCH_SIZE = 128
 SEQ_LEN = 512
 N_WORKERS = 8
 DEVICE = "cpu"
-=======
-NUM_BATCHES = 10
-BATCH_SIZE = 256
-SEQ_LEN = 1000
-N_WORKERS = 32
-DEVICE = "cuda"
->>>>>>> main
 
 env_builder, dataset_builder = make_task_builder("NetHackScore-v0-tty-bot-v0", data_path="../nethack/nle_data")
 
