@@ -14,9 +14,11 @@ from d5rl.utils.actions import ascii_actions_to_gym_actions
 def numba_roll(a):
     b = np.zeros_like(a)
     rows_num = a.shape[0]
+    cols_num = a.shape[1]
     for i in numba.prange(rows_num):
         b[i, -1] = a[i, 0]
-        b[i, :-1] = a[i, 1:]
+        for j in numba.prange(cols_num - 1):
+            b[i, j] = a[i, j + 1]
     return b
 
 
