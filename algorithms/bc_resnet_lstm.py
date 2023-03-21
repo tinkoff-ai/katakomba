@@ -21,6 +21,8 @@ from d5rl.tasks import make_task_builder
 from d5rl.utils.roles import Alignment, Race, Role, Sex
 from d5rl.nn.resnet import ResNet11, ResNet20, ResNet38, ResNet56, ResNet110
 
+torch.backends.cudnn.benchmark = True
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -57,13 +59,13 @@ class TrainConfig:
     # Model
     resnet_type: str = "ResNet11"
     lstm_layers: int = 1
-    hidden_dim: int = 2048
-    width_k: int = 1
+    hidden_dim: int = 1024
+    width_k: int = 4
     # Training
-    update_steps: int = 91552
+    update_steps: int = 180000
     batch_size: int = 256
     seq_len: int = 64
-    n_workers: int = 8
+    n_workers: int = 16
     learning_rate: float = 3e-4
     clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
@@ -188,6 +190,7 @@ def train(config: TrainConfig):
         width_k=config.width_k
     ).to(DEVICE)
     print("Number of parameters:",  sum(p.numel() for p in actor.parameters()))
+    actor = torch.compile(actor, mode="reduce-overhead")
 
     optim = torch.optim.AdamW(
         actor.parameters(),
@@ -206,39 +209,39 @@ def train(config: TrainConfig):
     rnn_state = None
     loader_iter = iter(loader)
     for step in trange(config.update_steps, desc="Training"):
-        with timeit() as timer:
-            states, actions, *_ = next(loader_iter)
+        # with timeit() as timer:
+        states, actions, *_ = next(loader_iter)
 
-        wandb.log({
-            "times/batch_loading_cpu": timer.elapsed_time_cpu,
-            "times/batch_loading_gpu": timer.elapsed_time_gpu
-        }, step=step)
+        # wandb.log({
+        #     "times/batch_loading_cpu": timer.elapsed_time_cpu,
+        #     "times/batch_loading_gpu": timer.elapsed_time_gpu
+        # }, step=step)
 
-        with timeit() as timer:
-            with torch.cuda.amp.autocast():
-                logits, rnn_state = actor(
-                    states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
-                    state=rnn_state
-                )
-                rnn_state = [a.detach() for a in rnn_state]
+        # with timeit() as timer:
+        with torch.cuda.amp.autocast():
+            logits, rnn_state = actor(
+                states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
+                state=rnn_state
+            )
+            rnn_state = [a.detach() for a in rnn_state]
 
-                dist = Categorical(logits=logits)
-                loss = -dist.log_prob(actions.to(DEVICE)).mean()
+            dist = Categorical(logits=logits)
+            loss = -dist.log_prob(actions.to(DEVICE)).mean()
 
-        wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
+        # wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
 
-        with timeit() as timer:
-            scaler.scale(loss).backward()
-            # loss.backward()
-            if config.clip_grad_norm is not None:
-                scaler.unscale_(optim)
-                torch.nn.utils.clip_grad_norm(actor.parameters(), config.clip_grad_norm)
-            # optim.step()
-            scaler.step(optim)
-            scaler.update()
-            optim.zero_grad(set_to_none=True)
+        # with timeit() as timer:
+        scaler.scale(loss).backward()
+        # loss.backward()
+        if config.clip_grad_norm is not None:
+            scaler.unscale_(optim)
+            torch.nn.utils.clip_grad_norm(actor.parameters(), config.clip_grad_norm)
+        # optim.step()
+        scaler.step(optim)
+        scaler.update()
+        optim.zero_grad(set_to_none=True)
 
-        wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
+        # wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
 
         wandb.log({
             "loss": loss.detach().item()

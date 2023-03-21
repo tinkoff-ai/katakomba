@@ -8,6 +8,7 @@ import torch.nn.functional as F
 # 3. https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py
 
 
+# TODO: add support for GroupNorm normalization (as we might use small batches on V100)
 def conv3x3(in_channels, out_channels, stride=1):
     """3x3 convolution with padding"""
     return nn.Conv2d(
