@@ -2,16 +2,22 @@ import itertools
 from copy import deepcopy
 
 import numpy as np
-from nle.dataset.dataset import TtyrecDataset
 
+import numba
+from nle.dataset.dataset import TtyrecDataset
 from d5rl.datasets.base import BaseAutoAscend
+from d5rl.utils.observations import tty_to_numpy
 from d5rl.utils.actions import ascii_actions_to_gym_actions
-from d5rl.utils.observations import tty_to_numpy
 
-from nle.dataset.dataset import TtyrecDataset
 
-from d5rl.datasets.base import BaseAutoAscend
-from d5rl.utils.observations import tty_to_numpy
+@numba.njit(parallel=True)
+def numba_roll(a):
+    b = np.zeros_like(a)
+    rows_num = a.shape[0]
+    for i in numba.prange(rows_num):
+        b[i, -1] = a[i, 0]
+        b[i, :-1] = a[i, 1:]
+    return b
 
 
 class _SARSAutoAscendTTYIterator:
@@ -33,9 +39,13 @@ class _SARSAutoAscendTTYIterator:
             # [r_n, r_n+1, r_n+2, r_n-1]
             # [d_n, d_n+1, d_n+2, d_n-1]
             # [s_n+1, s_n+2, s_n+3, s_n]
-            rewards = np.roll(rewards, shift=-1, axis=1)
-            dones = np.roll(dones, shift=-1, axis=1)
-            next_states = np.roll(deepcopy(states), shift=-1, axis=1)
+            rewards = numba_roll(rewards)
+            dones = numba_roll(dones)
+            next_states = numba_roll(states)
+
+            # rewards = np.roll(rewards, shift=-1, axis=1)
+            # dones = np.roll(dones, shift=-1, axis=1)
+            # next_states = np.roll(deepcopy(states), shift=-1, axis=1)
 
             # Replace the last element using the information from the next batch
             # [r_n, r_n+1, r_n+2, r_n+3]
@@ -68,10 +78,12 @@ class _SARSAutoAscendTTYIterator:
         actions = ascii_actions_to_gym_actions(batch["keypresses"])
 
         # [batch_size, seq_len]
-        rewards = deepcopy(batch["scores"])
+        # rewards = deepcopy(batch["scores"])
+        rewards = batch["scores"]
 
         # [batch_size, seq_len]
-        dones = deepcopy(batch["done"])
+        # dones = deepcopy(batch["done"])
+        dones = batch["done"]
 
         return states, actions, rewards, dones
 
