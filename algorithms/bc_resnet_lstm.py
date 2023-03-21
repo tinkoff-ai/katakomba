@@ -57,21 +57,21 @@ class TrainConfig:
     name: str = "DummyBC"
     version: str = "v0"
     # Model
-    resnet_type: str = "ResNet11"
-    lstm_layers: int = 1
+    resnet_type: str = "ResNet20"
+    lstm_layers: int = 2
     hidden_dim: int = 1024
-    width_k: int = 4
+    width_k: int = 1
     # Training
-    update_steps: int = 180000
+    update_steps: int = 360000
     batch_size: int = 256
-    seq_len: int = 64
+    seq_len: int = 32
     n_workers: int = 16
     learning_rate: float = 3e-4
     clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
     eval_every: int = 10_000
-    eval_episodes_per_seed: int = 50
-    eval_seeds: Tuple[int] = (228, 1337, 1307, 2, 10000)
+    eval_episodes_per_seed: int = 1
+    eval_seeds: int = 50
     train_seed: int = 42
 
     def __post_init__(self):
@@ -175,7 +175,7 @@ def train(config: TrainConfig):
         .races([Race.HUMAN])
         .alignments([Alignment.NEUTRAL])
         .sex([Sex.MALE])
-        .eval_seeds(list(config.eval_seeds))
+        .eval_seeds(list(range(config.eval_seeds)))
     )
     dataset = dataset_builder.build(
         batch_size=config.batch_size,
