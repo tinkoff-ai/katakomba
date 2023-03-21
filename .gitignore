@@ -7,6 +7,14 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Misc
+test.py
+test.ipynb
+.ml-job-preset.yml
+mlc_run.sh
+wandb
+algorithms/bc_resnet_lstm_accelerate.py
+
 # C extensions
 *.so
 

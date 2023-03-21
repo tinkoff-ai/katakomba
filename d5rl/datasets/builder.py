@@ -38,6 +38,7 @@ class AutoAscendDatasetBuilder:
             f"AutoAscend Dataset has {nld.db.count_games('autoascend', conn=db_conn)} games."
         )
 
+        self.db_path = db_path
         # Pre-init filters
         # Note that all strings are further converted to be first-letter-capitalized
         # This is how it's stored in dungeons data :shrug:
@@ -91,6 +92,7 @@ class AutoAscendDatasetBuilder:
         tp = ThreadPoolExecutor(max_workers=n_workers)
         self._dataset = nld.TtyrecDataset(
             dataset_name="autoascend",
+            dbfilename=self.db_path,
             batch_size=batch_size,
             seq_length=seq_len,
             shuffle=True,
