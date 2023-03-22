@@ -125,7 +125,7 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
     actor.eval()
     eval_stats = defaultdict(dict)
 
-    for (character, env, seed) in env_builder.evaluate():
+    for (character, env, seed) in tqdm(env_builder.evaluate()):
         episodes_rewards = []
         for _ in trange(episodes_per_seed, desc="One seed evaluation", leave=False):
             env.seed(seed, reseed=False)
@@ -140,6 +140,10 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
             episodes_rewards.append(episode_reward)
 
         eval_stats[character][seed] = np.mean(episodes_rewards)
+
+    # for each character also log mean across all seeds
+    for character in eval_stats.keys():
+        eval_stats[character]["mean_return"] = np.mean(list(eval_stats[character].values()))
 
     actor.train()
     return eval_stats
@@ -235,7 +239,7 @@ def train(config: TrainConfig):
         # loss.backward()
         if config.clip_grad_norm is not None:
             scaler.unscale_(optim)
-            torch.nn.utils.clip_grad_norm(actor.parameters(), config.clip_grad_norm)
+            torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
         # optim.step()
         scaler.step(optim)
         scaler.update()
