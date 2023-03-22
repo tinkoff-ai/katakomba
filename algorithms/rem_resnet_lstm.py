@@ -36,13 +36,13 @@ class TrainConfig:
     name: str = "REM"
     version: str = "v0"
     # Model
-    resnet_type: str = "ResNet11"
+    resnet_type: str = "ResNet20"
     lstm_layers: int = 1
-    hidden_dim: int = 32
+    hidden_dim: int = 1024
     width_k: int = 1
     tau: float = 5e-3
     gamma: float = 0.99
-    num_heads: int = 10
+    num_heads: int = 100
     # Training
     update_steps: int = 180000
     batch_size: int = 256
@@ -75,15 +75,14 @@ def soft_update(target, source, tau):
         tp.data.copy_((1 - tau) * tp.data + tau * sp.data)
 
 
-# TODO: may be we should sample it on each bach outside of Critic class
 def sample_convex_combination(size, device="cpu"):
     weights = torch.rand(size, device=device)
     weights = weights / weights.sum()
-    assert weights.sum().item() == 1.0
+    assert torch.isclose(weights.sum(), torch.tensor([1.0], device=device))
     return weights
 
 
-def dqn_loss(
+def rem_dqn_loss(
         critic,
         target_critic,
         obs,
@@ -93,17 +92,21 @@ def dqn_loss(
         dones,
         rnn_states,
         target_rnn_states,
+        convex_comb_weights,
         gamma,
 ):
     # TODO: should we use double Q? should we use target scaling as in Ape-X DQN?
     with torch.no_grad():
-        next_q_values, next_target_rnn_states = target_critic(next_obs, state=target_rnn_states, reduction="convex")
+        next_q_values, next_target_rnn_states = target_critic(next_obs, state=target_rnn_states)
+        next_q_values = (next_q_values * convex_comb_weights).sum(2)
         next_q_values = next_q_values.max(dim=-1).values
+
         assert next_q_values.shape == rewards.shape == dones.shape
         q_target = rewards + gamma * (1 - dones) * next_q_values
 
     assert actions.dim() == 2
-    q_pred, next_rnn_states = critic(obs, state=rnn_states, reduction="convex")
+    q_pred, next_rnn_states = critic(obs, state=rnn_states)
+    q_pred = (q_pred * convex_comb_weights.detach()).sum(2)
     q_pred = q_pred.gather(-1, actions.to(torch.long).unsqueeze(-1)).squeeze()
     assert q_pred.shape == q_target.shape
 
@@ -123,37 +126,27 @@ class Critic(nn.Module):
             batch_first=True
         )
         self.head = nn.Linear(hidden_dim, num_heads * action_dim)
-        self.combination = sample_convex_combination(num_heads).view(1, 1, -1, 1)
 
         self.action_dim = action_dim
         self.num_heads = num_heads
 
-    def forward(self, obs, state=None, reduction="convex"):
+    def forward(self, obs, state=None):
         # [batch_size, seq_len, ...]
         batch_size, seq_len, *_ = obs.shape
 
         out = self.state_encoder(obs.flatten(0, 1)).view(batch_size, seq_len, -1)
         out, new_state = self.rnn(out, state)
         q_values_ensemble = self.head(out).view(batch_size, seq_len, self.num_heads, self.action_dim)
-
-        if reduction == "convex":
-            # convex combination of q_values (for training)
-            q_values_combined = (q_values_ensemble * self.combination).sum(2)
-        elif reduction == "mean":
-            # mean of the ensemble (for inference)
-            q_values_combined = q_values_ensemble.mean(2)
-        else:
-            raise RuntimeError("Unknown reduction. Should be one of: convex, mean")
-        assert q_values_combined.shape == (batch_size, seq_len, self.action_dim)
-
-        return q_values_combined, new_state
+        return q_values_ensemble, new_state
 
     @torch.no_grad()
     def act(self, obs, state=None, device="cpu"):
         assert obs.ndim == 3, "act only for single obs"
         obs = torch.tensor(obs, device=device, dtype=torch.float32).permute(2, 0, 1)
-        logits, new_state = self(obs[None, None, ...], state, reduction="mean")
-        return torch.argmax(logits).cpu().item(), new_state
+        q_values, new_state = self(obs[None, None, ...], state)
+        # mean q value over all heads
+        q_values = q_values.mean(2)
+        return torch.argmax(q_values).cpu().item(), new_state
 
 
 @torch.no_grad()
@@ -176,6 +169,10 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
             episodes_rewards.append(episode_reward)
 
         eval_stats[character][seed] = np.mean(episodes_rewards)
+
+    # for each character also log mean across all seeds
+    for character in eval_stats.keys():
+        eval_stats[character]["mean_return"] = np.mean(list(eval_stats[character].values()))
 
     actor.train()
     return eval_stats
@@ -250,17 +247,19 @@ def train(config: TrainConfig):
     for step in trange(config.update_steps, desc="Training"):
         obs, actions, rewards, dones, next_obs = [t.to(DEVICE) for t in next(loader_iter)]
 
+        convex_comb_weights = sample_convex_combination(config.num_heads, device=DEVICE).view(1, 1, -1, 1)
         # with torch.cuda.amp.autocast():
-        loss, rnn_state, target_rnn_state = dqn_loss(
+        loss, rnn_state, target_rnn_state = rem_dqn_loss(
             critic=critic,
             target_critic=target_critic,
-            obs=obs.permute(0, 1, 4, 2, 3),
+            obs=obs.permute(0, 1, 4, 2, 3).to(torch.float32),
             actions=actions,
             rewards=rewards,
-            next_obs=next_obs.permute(0, 1, 4, 2, 3),
+            next_obs=next_obs.permute(0, 1, 4, 2, 3).to(torch.float32),
             dones=dones,
             rnn_states=rnn_state,
             target_rnn_states=target_rnn_state,
+            convex_comb_weights=convex_comb_weights,
             gamma=config.gamma
         )
         rnn_state = [s.detach() for s in rnn_state]
