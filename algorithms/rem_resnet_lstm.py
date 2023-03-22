@@ -143,9 +143,9 @@ class Critic(nn.Module):
     def act(self, obs, state=None, device="cpu"):
         assert obs.ndim == 3, "act only for single obs"
         obs = torch.tensor(obs, device=device, dtype=torch.float32).permute(2, 0, 1)
-        q_values, new_state = self(obs[None, None, ...], state)
+        q_values_ensemble, new_state = self(obs[None, None, ...], state)
         # mean q value over all heads
-        q_values = q_values.mean(2)
+        q_values = q_values_ensemble.mean(2)
         return torch.argmax(q_values).cpu().item(), new_state
 
 
