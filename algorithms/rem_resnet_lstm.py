@@ -95,6 +95,7 @@ def dqn_loss(
         target_rnn_states,
         gamma,
 ):
+    # TODO: should we use double Q? should we use target scaling as in Ape-X DQN?
     with torch.no_grad():
         next_q_values, next_target_rnn_states = target_critic(next_obs, state=target_rnn_states, reduction="convex")
         next_q_values = next_q_values.max(dim=-1).values
@@ -262,6 +263,8 @@ def train(config: TrainConfig):
             target_rnn_states=target_rnn_state,
             gamma=config.gamma
         )
+        rnn_state = [s.detach() for s in rnn_state]
+        target_rnn_state = [s.detach() for s in target_rnn_state]
 
         # scaler.scale(loss).backward()
         loss.backward()
