@@ -36,13 +36,13 @@ class TrainConfig:
     name: str = "REM"
     version: str = "v0"
     # Model
-    resnet_type: str = "ResNet20"
+    resnet_type: str = "ResNet11"
     lstm_layers: int = 1
-    hidden_dim: int = 1024
+    hidden_dim: int = 512
     width_k: int = 1
-    tau: float = 5e-3
+    tau: float = 1e-3
     gamma: float = 0.99
-    num_heads: int = 100
+    num_heads: int = 200
     # Training
     update_steps: int = 180000
     batch_size: int = 256
@@ -82,6 +82,14 @@ def sample_convex_combination(size, device="cpu"):
     return weights
 
 
+def symlog(x):
+    return torch.sign(x) * torch.log(torch.abs(x) + 1)
+
+
+def symexp(x):
+    return torch.sign(x) * (torch.exp(torch.abs(x)) - 1)
+
+
 def rem_dqn_loss(
         critic,
         target_critic,
@@ -95,14 +103,15 @@ def rem_dqn_loss(
         convex_comb_weights,
         gamma,
 ):
-    # TODO: should we use double Q? should we use target scaling as in Ape-X DQN?
+    # TODO: should we use double Q?
     with torch.no_grad():
         next_q_values, next_target_rnn_states = target_critic(next_obs, state=target_rnn_states)
         next_q_values = (next_q_values * convex_comb_weights).sum(2)
         next_q_values = next_q_values.max(dim=-1).values
 
         assert next_q_values.shape == rewards.shape == dones.shape
-        q_target = rewards + gamma * (1 - dones) * next_q_values
+        # q_target = rewards + gamma * (1 - dones) * next_q_values
+        q_target = symlog(rewards + gamma * (1 - dones) * symexp(next_q_values))
 
     assert actions.dim() == 2
     q_pred, next_rnn_states = critic(obs, state=rnn_states)
@@ -111,7 +120,11 @@ def rem_dqn_loss(
     assert q_pred.shape == q_target.shape
 
     loss = F.mse_loss(q_pred, q_target)
-    return loss, next_rnn_states, next_target_rnn_states
+    loss_info = {
+        "loss": loss.item(),
+        "q_target": q_target.mean().item()
+    }
+    return loss, next_rnn_states, next_target_rnn_states, loss_info
 
 
 class Critic(nn.Module):
@@ -146,7 +159,8 @@ class Critic(nn.Module):
         q_values_ensemble, new_state = self(obs[None, None, ...], state)
         # mean q value over all heads
         q_values = q_values_ensemble.mean(2)
-        return torch.argmax(q_values).cpu().item(), new_state
+        # return torch.argmax(q_values).cpu().item(), new_state
+        return torch.argmax(symexp(q_values)).cpu().item(), new_state
 
 
 @torch.no_grad()
@@ -228,7 +242,7 @@ def train(config: TrainConfig):
         target_critic = deepcopy(critic)
 
     print("Number of parameters:",  sum(p.numel() for p in critic.parameters()))
-    # critic = torch.compile(critic, mode="reduce-overhead")
+    critic = torch.compile(critic, mode="reduce-overhead")
 
     optim = torch.optim.AdamW(critic.parameters(), lr=config.learning_rate)
 
@@ -247,9 +261,10 @@ def train(config: TrainConfig):
     for step in trange(config.update_steps, desc="Training"):
         obs, actions, rewards, dones, next_obs = [t.to(DEVICE) for t in next(loader_iter)]
 
-        convex_comb_weights = sample_convex_combination(config.num_heads, device=DEVICE).view(1, 1, -1, 1)
         # with torch.cuda.amp.autocast():
-        loss, rnn_state, target_rnn_state = rem_dqn_loss(
+        convex_comb_weights = sample_convex_combination(config.num_heads, device=DEVICE).view(1, 1, -1, 1)
+
+        loss, rnn_state, target_rnn_state, loss_info = rem_dqn_loss(
             critic=critic,
             target_critic=target_critic,
             obs=obs.permute(0, 1, 4, 2, 3).to(torch.float32),
@@ -277,7 +292,7 @@ def train(config: TrainConfig):
 
         soft_update(target_critic, critic, tau=config.tau)
 
-        wandb.log({"loss": loss.detach().item()}, step=step)
+        wandb.log(loss_info, step=step)
 
         if (step + 1) % config.eval_every == 0:
             eval_stats = evaluate(env_builder, critic, config.eval_episodes_per_seed, device=DEVICE)
