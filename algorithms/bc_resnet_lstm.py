@@ -59,7 +59,7 @@ class TrainConfig:
     version: str = "v0"
     # Model
     resnet_type: str = "ResNet11"
-    lstm_layers: int = 2
+    lstm_layers: int = 1
     hidden_dim: int = 1024
     width_k: int = 1
     # Training
@@ -68,6 +68,7 @@ class TrainConfig:
     seq_len: int = 32
     n_workers: int = 16
     learning_rate: float = 3e-4
+    weight_decay: float = 0.0
     clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
     eval_every: int = 10_000
@@ -199,7 +200,11 @@ def train(config: TrainConfig):
     print("Number of parameters:",  sum(p.numel() for p in actor.parameters()))
     # ONLY FOR MLC/TRS
     # actor = torch.compile(actor, mode="reduce-overhead")
-    optim = torch.optim.AdamW(actor.parameters(), lr=config.learning_rate)
+    optim = torch.optim.AdamW(
+        actor.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay
+    )
 
     loader = DataLoader(
         dataset=dataset,
