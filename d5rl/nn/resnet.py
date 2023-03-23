@@ -59,7 +59,7 @@ class BasicBlock(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, depth, num_filters, img_channels=3, out_dim=512):
+    def __init__(self, depth, num_filters, img_channels=3, out_dim=1024):
         super().__init__()
         assert (depth - 2) % 9 == 0, "Depth should be 9n+2, e.g. 11, 20, 29, 38, 47, 56, 110, 1199"
         n = (depth - 2) // 9
@@ -109,7 +109,8 @@ class ResNet(nn.Module):
         x = self.layer4(x)
 
         # for 24x80 final would be 64x3x10
-        x = self.avgpool(x)
+        # x = self.avgpool(x)
+        # would be of shape [batch_size, 3840 * k]
         x = x.flatten(1)
         x = self.fc(x)
 
@@ -143,8 +144,8 @@ class ResNet110(ResNet):
 
 
 if __name__ == "__main__":
-    test_img = torch.randn(2, 3, 24, 80)
-    model = ResNet11(3, 256, k=1)
+    test_img = torch.randn(8, 3, 24, 80)
+    model = ResNet11(3, 256, k=4)
 
     print(model(test_img).shape)
 

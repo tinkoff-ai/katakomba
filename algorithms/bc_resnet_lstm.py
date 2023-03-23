@@ -16,7 +16,8 @@ from collections import defaultdict
 from torch.distributions import Categorical
 import numpy as np
 
-from typing import Optional, Tuple
+from typing import Optional
+from d5rl.datasets.sa_autoascend import SAAutoAscendTTYDataset
 from d5rl.tasks import make_task_builder
 from d5rl.utils.roles import Alignment, Race, Role, Sex
 from d5rl.nn.resnet import ResNet11, ResNet20, ResNet38, ResNet56, ResNet110
@@ -57,12 +58,12 @@ class TrainConfig:
     name: str = "DummyBC"
     version: str = "v0"
     # Model
-    resnet_type: str = "ResNet20"
+    resnet_type: str = "ResNet11"
     lstm_layers: int = 2
     hidden_dim: int = 1024
     width_k: int = 1
     # Training
-    update_steps: int = 360000
+    update_steps: int = 180_000
     batch_size: int = 256
     seq_len: int = 32
     n_workers: int = 16
@@ -75,10 +76,10 @@ class TrainConfig:
     train_seed: int = 42
 
     def __post_init__(self):
-        self.group = f"{self.env}-{self.name}-{self.version}"
-        self.name = f"{self.group}-{str(uuid.uuid4())[:8]}"
+        self.group = f"{self.group}-{self.env}-{self.version}"
+        self.name = f"{self.name}-{str(uuid.uuid4())[:8]}"
         if self.checkpoints_path is not None:
-            self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
+            self.checkpoints_path = os.path.join(self.checkpoints_path, self.group, self.name)
 
 
 def set_seed(seed: int):
@@ -92,7 +93,8 @@ class Actor(nn.Module):
     def __init__(self, action_dim, hidden_dim, lstm_layers, width_k, resnet_type):
         super().__init__()
         resnet = getattr(sys.modules[__name__], resnet_type)
-        self.state_encoder = resnet(img_channels=3, out_dim=hidden_dim, k=width_k)
+        self.state_encoder = resnet(img_channels=2, out_dim=hidden_dim, k=width_k)
+        self.norm = nn.LayerNorm(hidden_dim)
         self.rnn = nn.LSTM(
             input_size=hidden_dim,
             hidden_size=hidden_dim,
@@ -107,7 +109,7 @@ class Actor(nn.Module):
         batch_size, seq_len, *_ = obs.shape
 
         out = self.state_encoder(obs.flatten(0, 1)).view(batch_size, seq_len, -1)
-        out, new_state = self.rnn(out, state)
+        out, new_state = self.rnn(self.norm(out), state)
         logits = self.head(out)
 
         return logits, new_state
@@ -184,7 +186,8 @@ def train(config: TrainConfig):
     dataset = dataset_builder.build(
         batch_size=config.batch_size,
         seq_len=config.seq_len,
-        n_workers=config.n_workers
+        n_workers=config.n_workers,
+        auto_ascend_cls=SAAutoAscendTTYDataset
     )
     actor = Actor(
         resnet_type=config.resnet_type,
@@ -194,12 +197,9 @@ def train(config: TrainConfig):
         width_k=config.width_k
     ).to(DEVICE)
     print("Number of parameters:",  sum(p.numel() for p in actor.parameters()))
-    actor = torch.compile(actor, mode="reduce-overhead")
-
-    optim = torch.optim.AdamW(
-        actor.parameters(),
-        lr=config.learning_rate,
-    )
+    # ONLY FOR MLC/TRS
+    # actor = torch.compile(actor, mode="reduce-overhead")
+    optim = torch.optim.AdamW(actor.parameters(), lr=config.learning_rate)
 
     loader = DataLoader(
         dataset=dataset,
@@ -213,47 +213,50 @@ def train(config: TrainConfig):
     rnn_state = None
     loader_iter = iter(loader)
     for step in trange(config.update_steps, desc="Training"):
-        # with timeit() as timer:
-        states, actions, *_ = next(loader_iter)
-
-        # wandb.log({
-        #     "times/batch_loading_cpu": timer.elapsed_time_cpu,
-        #     "times/batch_loading_gpu": timer.elapsed_time_gpu
-        # }, step=step)
-
-        # with timeit() as timer:
-        with torch.cuda.amp.autocast():
-            logits, rnn_state = actor(
-                states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
-                state=rnn_state
-            )
-            rnn_state = [a.detach() for a in rnn_state]
-
-            dist = Categorical(logits=logits)
-            loss = -dist.log_prob(actions.to(DEVICE)).mean()
-
-        # wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
-
-        # with timeit() as timer:
-        scaler.scale(loss).backward()
-        # loss.backward()
-        if config.clip_grad_norm is not None:
-            scaler.unscale_(optim)
-            torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
-        # optim.step()
-        scaler.step(optim)
-        scaler.update()
-        optim.zero_grad(set_to_none=True)
-
-        # wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
+        with timeit() as timer:
+            tty_chars, tty_colors, tty_cursor, actions = next(loader_iter)
 
         wandb.log({
-            "loss": loss.detach().item()
+            "times/batch_loading_cpu": timer.elapsed_time_cpu,
+            "times/batch_loading_gpu": timer.elapsed_time_gpu
+        }, step=step)
+
+        with timeit() as timer:
+            with torch.cuda.amp.autocast():
+                states = torch.stack([tty_chars, tty_colors], axis=-1)
+                logits, rnn_state = actor(
+                    states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
+                    state=rnn_state
+                )
+                rnn_state = [a.detach() for a in rnn_state]
+
+                dist = Categorical(logits=logits)
+                loss = -dist.log_prob(actions.to(DEVICE)).mean()
+
+        wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
+
+        with timeit() as timer:
+            scaler.scale(loss).backward()
+            # loss.backward()
+            if config.clip_grad_norm is not None:
+                scaler.unscale_(optim)
+                torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
+            # optim.step()
+            scaler.step(optim)
+            scaler.update()
+            optim.zero_grad(set_to_none=True)
+
+        wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
+
+        wandb.log({
+            "loss": loss.detach().item(),
+            "transitions": config.batch_size * config.seq_len * step
         }, step=step)
 
         if (step + 1) % config.eval_every == 0:
             eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
-            wandb.log(eval_stats, step=step)
+            wandb.log(
+                dict(eval_stats, **{"transitions": config.batch_size * config.seq_len * step}), step=step)
 
             if config.checkpoints_path is not None:
                 torch.save(
