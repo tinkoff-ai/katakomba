@@ -36,13 +36,13 @@ class TrainConfig:
     name: str = "REM"
     version: str = "v0"
     # Model
-    resnet_type: str = "ResNet11"
+    resnet_type: str = "ResNet20"
     lstm_layers: int = 1
-    hidden_dim: int = 512
+    hidden_dim: int = 2048
     width_k: int = 1
-    tau: float = 1e-3
+    tau: float = 5e-3
     gamma: float = 0.99
-    num_heads: int = 200
+    num_heads: int = 1
     # Training
     update_steps: int = 180000
     batch_size: int = 256
@@ -103,7 +103,7 @@ def rem_dqn_loss(
         convex_comb_weights,
         gamma,
 ):
-    # TODO: should we use double Q?
+    # TODO: should we use double Q? should we use temporal consistency loss from Ape-X DQfD?
     with torch.no_grad():
         next_q_values, next_target_rnn_states = target_critic(next_obs, state=target_rnn_states)
         next_q_values = (next_q_values * convex_comb_weights).sum(2)
@@ -148,6 +148,7 @@ class Critic(nn.Module):
         batch_size, seq_len, *_ = obs.shape
 
         out = self.state_encoder(obs.flatten(0, 1)).view(batch_size, seq_len, -1)
+        #TODO: should we normalize penultimate layer?
         out, new_state = self.rnn(out, state)
         q_values_ensemble = self.head(out).view(batch_size, seq_len, self.num_heads, self.action_dim)
         return q_values_ensemble, new_state
