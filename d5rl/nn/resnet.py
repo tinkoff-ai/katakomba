@@ -77,8 +77,8 @@ class ResNet(nn.Module):
         # as we need higher downsampling for 24x80 nethack img -> 3x10
         self.layer4 = self.__make_layer(BasicBlock, num_filters[4], n, stride=2)
 
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(num_filters[4], out_dim)
+        # self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(num_filters[4] * 3 * 10, out_dim)
 
         # TODO: add optional identity init for residual as in original pytorch resnet
         for m in self.modules():
@@ -99,6 +99,7 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        assert x.shape[-2:] == (24, 80), "for now, this encoder only for full nethack img"
         x = self.conv1(x)
         x = self.bn1(x)
         x = F.relu(x, inplace=True)
@@ -110,7 +111,9 @@ class ResNet(nn.Module):
 
         # for 24x80 final would be 64x3x10
         # x = self.avgpool(x)
-        # would be of shape [batch_size, 3840 * k]
+
+        # would be of shape [batch_size, 3840 * k],
+        # if this is too much, we should allow stride=2 for first block
         x = x.flatten(1)
         x = self.fc(x)
 
@@ -145,7 +148,7 @@ class ResNet110(ResNet):
 
 if __name__ == "__main__":
     test_img = torch.randn(8, 3, 24, 80)
-    model = ResNet11(3, 256, k=4)
+    model = ResNet11(3, 1024, k=1)
 
     print(model(test_img).shape)
 
