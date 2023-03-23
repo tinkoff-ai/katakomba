@@ -20,7 +20,7 @@ from typing import Optional
 from d5rl.datasets.sa_autoascend import SAAutoAscendTTYDataset
 from d5rl.tasks import make_task_builder
 from d5rl.utils.roles import Alignment, Race, Role, Sex
-from d5rl.nn.resnet import ResNet11, ResNet20, ResNet38, ResNet56, ResNet110
+from d5rl.nn.perceiver.perceiver import Perceiver
 
 torch.backends.cudnn.benchmark = True
 
@@ -62,7 +62,7 @@ class TrainConfig:
     lstm_layers: int = 1
     hidden_dim: int = 1024
     width_k: int = 1
-    chrono_init_tmax: Optional[int] = 5000.0
+    chrono_init_tmax: Optional[int] = None
     # Training
     update_steps: int = 180_000
     batch_size: int = 256
