@@ -3,16 +3,23 @@ import time
 from torch.utils.data import DataLoader
 
 from d5rl.tasks import make_task_builder
+from d5rl.datasets.sa_autoascend import SAAutoAscendTTYDataset
 
-NUM_BATCHES = 50
-BATCH_SIZE = 128
-SEQ_LEN = 512
+
+NUM_BATCHES = 200
+BATCH_SIZE = 256
+SEQ_LEN = 32
 N_WORKERS = 8
 DEVICE = "cpu"
 
 env_builder, dataset_builder = make_task_builder("NetHackScore-v0-tty-bot-v0", data_path="../nethack/nle_data")
 
-dataset = dataset_builder.build(batch_size=BATCH_SIZE, seq_len=SEQ_LEN, n_workers=N_WORKERS)
+dataset = dataset_builder.build(
+    batch_size=BATCH_SIZE,
+    seq_len=SEQ_LEN,
+    n_workers=N_WORKERS,
+    auto_ascend_cls=SAAutoAscendTTYDataset
+)
 
 loader = DataLoader(
     dataset=dataset,
@@ -23,12 +30,7 @@ loader = DataLoader(
 
 start = time.time()
 for ind, batch in enumerate(loader):
-    states, actions, rewards, dones, next_states = batch
-    states.to(DEVICE)
-    actions.to(DEVICE)
-    rewards.to(DEVICE)
-    dones.to(DEVICE)
-    next_states.to(DEVICE)
+    device_batch = [t.to(DEVICE) for t in batch]
 
     if (ind + 1) == NUM_BATCHES:
         break
