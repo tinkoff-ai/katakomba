@@ -69,6 +69,7 @@ class Perceiver(nn.Module):
             latent_trans_layers=1,
             depth=6,
             num_bands=4,
+            share_weights=False,
     ):
         super().__init__()
         assert len(img_shape) == 2
@@ -88,9 +89,12 @@ class Perceiver(nn.Module):
                 latent_trans_heads,
                 latent_trans_layers
             )
-            for _ in range(depth)
+            # we not share 1 block (as in paper), while all others are shared
+            for _ in range(depth if not share_weights else 2)
         ])
         self.head = nn.Linear(hidden_dim, out_dim)
+        self.depth = depth
+        self.share_weights = share_weights
 
     def forward(self, x):
         # x: [seq_len, batch_size, emb_dim]
@@ -100,12 +104,34 @@ class Perceiver(nn.Module):
         x = self.to_hidden(x)
 
         latent = self.latent.expand(batch_size, -1, -1)
-
-        for block in self.perceiver_blocks:
-            latent = block(x, latent)
+        if self.share_weights:
+            # first block is always not shared (as in paper)
+            latent = self.perceiver_blocks[0](x, latent)
+            for d in range(self.depth - 1):
+                # reuse block multiple times as in RNN
+                latent = self.perceiver_blocks[1](x, latent)
+        else:
+            for block in self.perceiver_blocks:
+                latent = block(x, latent)
 
         # mean across len
         latent = latent.mean(1)
         out = self.head(latent)
 
         return out
+
+
+if __name__ == "__main__":
+    model = Perceiver(
+        input_dim=32,
+        hidden_dim=32,
+        latent_len=32,
+        out_dim=32,
+        latent_trans_layers=2,
+        depth=6,
+        share_weights=True
+    )
+    x = torch.randn(16, 24 * 80, 32)
+    print(sum(p.numel() for p in model.parameters()))
+    print(model(x).shape)
+    print(len(model.perceiver_blocks))

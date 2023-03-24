@@ -58,13 +58,13 @@ class TrainConfig:
     name: str = "DummyBC"
     version: str = "v0"
     # Model
-    resnet_type: str = "ResNet20"
-    lstm_layers: int = 1
-    hidden_dim: int = 1024
-    width_k: int = 1
+    resnet_type: str = "ResNet11"
+    lstm_layers: int = 2
+    hidden_dim: int = 512
+    width_k: int = 2
     # Training
     update_steps: int = 180_000
-    batch_size: int = 256
+    batch_size: int = 64
     seq_len: int = 32
     n_workers: int = 16
     learning_rate: float = 3e-4
@@ -140,14 +140,13 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
     actor.eval()
     eval_stats = defaultdict(dict)
 
+    rnn_state = None
     for (character, env, seed) in tqdm(env_builder.evaluate()):
         episodes_rewards = []
         for _ in trange(episodes_per_seed, desc="One seed evaluation", leave=False):
             env.seed(seed, reseed=False)
 
             obs, done, episode_reward = env.reset(), False, 0.0
-            rnn_state = None
-
             while not done:
                 action, rnn_state = actor.act(obs[..., :2], rnn_state, device=device)
                 obs, reward, done, _ = env.step(action)
@@ -212,6 +211,7 @@ def train(config: TrainConfig):
     print("Number of parameters:",  sum(p.numel() for p in actor.parameters()))
     # ONLY FOR MLC/TRS
     # actor = torch.compile(actor, mode="reduce-overhead")
+
     optim = torch.optim.AdamW(
         (p for p in actor.parameters() if p.requires_grad),
         lr=config.learning_rate,

@@ -23,8 +23,6 @@ from d5rl.utils.observations import num_chars, num_colors
 from d5rl.utils.roles import Alignment, Race, Role, Sex
 from d5rl.nn.perceiver.perceiver import Perceiver
 
-torch.backends.cudnn.benchmark = True
-
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -43,6 +41,8 @@ class timeit:
         self.elapsed_time_cpu = time.time() - self.start_cpu
 
 
+# TODO: add prev action to the lstm
+# TODO: add lr scheduler + warmup
 @dataclass
 class TrainConfig:
     env: str = "Perceiver-NetHackScore-v0-tty-bot-v0"
@@ -54,20 +54,21 @@ class TrainConfig:
     name: str = "PerceiverBC"
     version: str = "v0"
     # Model
-    embedding_dim: int = 64
-    per_hidden_dim: int = 256
-    per_latent_len: int = 128
+    embedding_dim: int = 32
+    per_hidden_dim: int = 64
+    per_latent_len: int = 64
     per_out_dim: int = 512
-    per_cross_trans_heads: int = 1
+    per_cross_trans_heads: int = 4
     per_latent_trans_heads: int = 4
     per_latent_trans_layers: int = 1
-    per_depth = 6
-    per_num_bands = 4
+    per_depth: int = 8
+    per_share_weights: bool = True
+    per_num_bands = 16
     lstm_layers: int = 1
-    lstm_hidden_dim: int = 512
+    lstm_hidden_dim: int = 1024
     # Training
     update_steps: int = 180_000
-    batch_size: int = 256
+    batch_size: int = 64
     seq_len: int = 32
     n_workers: int = 16
     learning_rate: float = 3e-4
@@ -118,6 +119,7 @@ class Actor(nn.Module):
             per_latent_trans_heads=4,
             per_latent_trans_layers=1,
             per_depth=6,
+            per_share_weights=True,
             per_num_bands=4,
             lstm_hidden_dim=256,
             lstm_layers=1,
@@ -135,6 +137,7 @@ class Actor(nn.Module):
             latent_trans_heads=per_latent_trans_heads,
             latent_trans_layers=per_latent_trans_layers,
             depth=per_depth,
+            share_weights=per_share_weights,
             num_bands=per_num_bands
         )
         self.rnn = nn.LSTM(
@@ -259,6 +262,7 @@ def train(config: TrainConfig):
         per_latent_trans_heads=config.per_latent_trans_heads,
         per_latent_trans_layers=config.per_latent_trans_layers,
         per_depth=config.per_depth,
+        per_share_weights=config.per_share_weights,
         per_num_bands=config.per_num_bands,
         lstm_hidden_dim=config.lstm_hidden_dim,
         lstm_layers=config.lstm_layers,
@@ -280,45 +284,45 @@ def train(config: TrainConfig):
         batch_size=None,
         pin_memory=True
     )
-    # scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.cuda.amp.GradScaler()
 
     rnn_state = None
     loader_iter = iter(loader)
     for step in trange(config.update_steps, desc="Training"):
-        # with timeit() as timer:
-        tty_chars, tty_colors, tty_cursor, actions = next(loader_iter)
+        with timeit() as timer:
+            tty_chars, tty_colors, tty_cursor, actions = next(loader_iter)
 
-        # wandb.log({
-        #     "times/batch_loading_cpu": timer.elapsed_time_cpu,
-        #     "times/batch_loading_gpu": timer.elapsed_time_gpu
-        # }, step=step)
+        wandb.log({
+            "times/batch_loading_cpu": timer.elapsed_time_cpu,
+            "times/batch_loading_gpu": timer.elapsed_time_gpu
+        }, step=step)
 
-        # with timeit() as timer:
-            # with torch.cuda.amp.autocast():
-        logits, rnn_state = actor(
-            tty_chars=tty_chars.to(torch.int).to(DEVICE),
-            tty_colors=tty_colors.to(torch.int).to(DEVICE),
-            state=rnn_state
-        )
-        rnn_state = [a.detach() for a in rnn_state]
+        with timeit() as timer:
+            with torch.cuda.amp.autocast():
+                logits, rnn_state = actor(
+                    tty_chars=tty_chars.to(torch.int).to(DEVICE),
+                    tty_colors=tty_colors.to(torch.int).to(DEVICE),
+                    state=rnn_state
+                )
+                rnn_state = [a.detach() for a in rnn_state]
 
-        dist = Categorical(logits=logits)
-        loss = -dist.log_prob(actions.to(DEVICE)).mean()
+                dist = Categorical(logits=logits)
+                loss = -dist.log_prob(actions.to(DEVICE)).mean()
 
-        # wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
+        wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
 
-        # with timeit() as timer:
-        # scaler.scale(loss).backward()
-        loss.backward()
-        if config.clip_grad_norm is not None:
-            # scaler.unscale_(optim)
-            torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
-        optim.step()
-        # scaler.step(optim)
-        # scaler.update()
-        optim.zero_grad(set_to_none=True)
+        with timeit() as timer:
+            scaler.scale(loss).backward()
+            # loss.backward()
+            if config.clip_grad_norm is not None:
+                scaler.unscale_(optim)
+                torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
+            # optim.step()
+            scaler.step(optim)
+            scaler.update()
+            optim.zero_grad(set_to_none=True)
 
-        # wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
+        wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
 
         wandb.log({
             "loss": loss.detach().item(),
@@ -338,10 +342,4 @@ def train(config: TrainConfig):
 
 
 if __name__ == "__main__":
-    # model = Actor(action_dim=100)
-    # print(sum(p.numel() for p in model.parameters()))
-    #
-    # chars = torch.randint(0, num_chars(), size=(2, 3, 24, 80))
-    # colors = torch.randint(0, num_colors(), size=(2, 3, 24, 80))
-    # model(chars, colors)
     train()
