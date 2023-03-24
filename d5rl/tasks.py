@@ -5,12 +5,17 @@ from typing import Tuple
 from d5rl.datasets.builder import AutoAscendDatasetBuilder
 from d5rl.envs import NetHackChallenge
 from d5rl.envs.builder import NetHackEnvBuilder
-from d5rl.wrappers import TTYWrapper
+from d5rl.wrappers import TTYWrapper, PerceiverTTYWrapper
 
 TASKS = {
     "NetHackScore-v0-tty-bot-v0": {
         "env_fn": NetHackChallenge,
         "wrapper_fn": TTYWrapper,
+        "dataset_builder_fn": AutoAscendDatasetBuilder,
+    },
+    "Perceiver-NetHackScore-v0-tty-bot-v0": {
+        "env_fn": NetHackChallenge,
+        "wrapper_fn": PerceiverTTYWrapper,
         "dataset_builder_fn": AutoAscendDatasetBuilder,
     }
 }

@@ -45,7 +45,7 @@ class timeit:
 
 @dataclass
 class TrainConfig:
-    env: str = "NetHackScore-v0-tty-bot-v0"
+    env: str = "Perceiver-NetHackScore-v0-tty-bot-v0"
     data_path: str = "data/nle_data"
     db_path: str = "ttyrecs.db"
     # Wandb logging
@@ -55,16 +55,16 @@ class TrainConfig:
     version: str = "v0"
     # Model
     embedding_dim: int = 64
-    per_hidden_dim: int = 128
+    per_hidden_dim: int = 256
     per_latent_len: int = 128
-    per_out_dim: int = 256
+    per_out_dim: int = 512
     per_cross_trans_heads: int = 1
     per_latent_trans_heads: int = 4
     per_latent_trans_layers: int = 1
-    per_depth = 2
+    per_depth = 6
     per_num_bands = 4
     lstm_layers: int = 1
-    lstm_hidden_dim: int = 256
+    lstm_hidden_dim: int = 512
     # Training
     update_steps: int = 180_000
     batch_size: int = 256
@@ -165,12 +165,50 @@ class Actor(nn.Module):
 
         return logits, new_state
 
-    # @torch.no_grad()
-    # def act(self, obs, state=None, device="cpu"):
-    #     assert obs.ndim == 3, "act only for single obs"
-    #     obs = torch.tensor(obs, device=device, dtype=torch.float32).permute(2, 0, 1)
-    #     logits, new_state = self(obs[None, None, ...], state)
-    #     return torch.argmax(logits).cpu().item(), new_state
+    @torch.no_grad()
+    def act(self, tty_chars, tty_colors, state=None, device="cpu"):
+        assert tty_chars.ndim == 2 and tty_colors.ndim == 2, "act only for single obs"
+        tty_chars = torch.tensor(tty_chars, device=device, dtype=torch.int)
+        tty_colors = torch.tensor(tty_colors, device=device, dtype=torch.int)
+        logits, new_state = self(
+            tty_chars=tty_chars[None, None, ...],
+            tty_colors=tty_colors[None, None, ...],
+            state=state
+        )
+        return torch.argmax(logits).cpu().item(), new_state
+
+
+@torch.no_grad()
+def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
+    actor.eval()
+    eval_stats = defaultdict(dict)
+    # WARN: we are not resetting lstm state after the episode end
+    rnn_state = None
+    for (character, env, seed) in tqdm(env_builder.evaluate()):
+        episodes_rewards = []
+        for _ in trange(episodes_per_seed, desc="One seed evaluation", leave=False):
+            env.seed(seed, reseed=False)
+
+            obs, done, episode_reward = env.reset(), False, 0.0
+            while not done:
+                action, rnn_state = actor.act(
+                    tty_chars=obs["tty_chars"],
+                    tty_colors=obs["tty_colors"],
+                    state=rnn_state,
+                    device=device
+                )
+                obs, reward, done, _ = env.step(action)
+                episode_reward += reward
+            episodes_rewards.append(episode_reward)
+
+        eval_stats[character][seed] = np.mean(episodes_rewards)
+
+    # for each character also log mean across all seeds
+    for character in eval_stats.keys():
+        eval_stats[character]["mean_return"] = np.mean(list(eval_stats[character].values()))
+
+    actor.train()
+    return eval_stats
 
 
 @pyrallis.wrap()
@@ -287,16 +325,16 @@ def train(config: TrainConfig):
             "transitions": config.batch_size * config.seq_len * step
         }, step=step)
 
-        # if (step + 1) % config.eval_every == 0:
-        #     eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
-        #     wandb.log(
-        #         dict(eval_stats, **{"transitions": config.batch_size * config.seq_len * step}), step=step)
-        #
-        #     if config.checkpoints_path is not None:
-        #         torch.save(
-        #             actor.state_dict(),
-        #             os.path.join(config.checkpoints_path, f"{step}.pt"),
-        #         )
+        if (step + 1) % config.eval_every == 0:
+            eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
+            wandb.log(
+                dict(eval_stats, **{"transitions": config.batch_size * config.seq_len * step}), step=step)
+
+            if config.checkpoints_path is not None:
+                torch.save(
+                    actor.state_dict(),
+                    os.path.join(config.checkpoints_path, f"{step}.pt"),
+                )
 
 
 if __name__ == "__main__":
