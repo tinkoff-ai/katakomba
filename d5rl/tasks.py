@@ -24,7 +24,7 @@ TASKS = {
 def make_task_builder(
         task: str,
         data_path: str = "data/nle_data",
-        db_path: str = "ttyrecs.db"
+        db_path: str = "ttyrecs.db",
 ) -> Tuple[NetHackEnvBuilder, AutoAscendDatasetBuilder]:
     """
     Creates environment and dataset builders for a task, which you can further configure for your needs.

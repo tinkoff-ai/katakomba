@@ -10,6 +10,7 @@ import uuid
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 from tqdm.auto import tqdm, trange
 from collections import defaultdict
@@ -52,7 +53,7 @@ class TrainConfig:
     # Wandb logging
     project: str = "NeuralNetHack"
     group: str = "PerceiverBC"
-    name: str = "PerceiverBC"
+    name: str = "PerceiverBC-prev-actions"
     version: str = "v0"
     # Model
     embedding_dim: int = 64
@@ -142,7 +143,7 @@ class Actor(nn.Module):
             num_bands=per_num_bands
         )
         self.rnn = nn.LSTM(
-            input_size=per_out_dim,
+            input_size=per_out_dim + action_dim,
             hidden_size=lstm_hidden_dim,
             num_layers=lstm_layers,
             batch_first=True
@@ -150,33 +151,42 @@ class Actor(nn.Module):
         orthogonal_init(self.rnn)
         self.head = nn.Linear(lstm_hidden_dim, action_dim)
 
-    def forward(self, tty_chars, tty_colors, state=None):
+        self.action_dim = action_dim
+
+    def forward(self, tty_chars, tty_colors, prev_actions, state=None):
         # [batch_size, seq_len, ...]
         batch_size, seq_len, H, W = tty_chars.shape
-        # TODO: mb we should add pos emb for chars and colors separately?
-
         # [batch_size, seq_len, H * W, emb_dim]
         embed_chars = self.chars_emb(tty_chars).view(batch_size, seq_len, H * W, -1)
         embed_colors = self.colors_emb(tty_colors).view(batch_size, seq_len, H * W, -1)
         # [batch_size, seq_len, H * W, 2 * emb_dim]
         embed = torch.cat([embed_chars, embed_colors], dim=-1)
         # [batch_size, seq_len, per_out_dim]
-        per_out = self.perceiver(embed.flatten(0, 1)).view(batch_size, seq_len, -1)
+        out = self.perceiver(embed.flatten(0, 1)).view(batch_size, seq_len, -1)
+
+        # [batch_size, seq_len, action_dim]
+        prev_actions = F.one_hot(prev_actions, num_classes=self.action_dim)
+        # [batch_size, seq_len, per_out_dim + action_dim]
+        out = torch.cat([out, prev_actions], dim=-1)
+
         # [batch_size, seq_len, lstm_hidden_dim]
-        lstm_out, new_state = self.rnn(per_out, state)
+        out, new_state = self.rnn(out, state)
         # [batch_size, seq_len, num_actions]
-        logits = self.head(lstm_out)
+        logits = self.head(out)
 
         return logits, new_state
 
     @torch.no_grad()
-    def act(self, tty_chars, tty_colors, state=None, device="cpu"):
+    def act(self, tty_chars, tty_colors, prev_actions, state=None, device="cpu"):
         assert tty_chars.ndim == 2 and tty_colors.ndim == 2, "act only for single obs"
         tty_chars = torch.tensor(tty_chars, device=device, dtype=torch.int)
         tty_colors = torch.tensor(tty_colors, device=device, dtype=torch.int)
+        prev_actions = torch.tensor(prev_actions, device=device, dtype=torch.long)
+
         logits, new_state = self(
             tty_chars=tty_chars[None, None, ...],
             tty_colors=tty_colors[None, None, ...],
+            prev_actions=prev_actions[None, None, ...],
             state=state
         )
         return torch.argmax(logits).cpu().item(), new_state
@@ -188,6 +198,8 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
     eval_stats = defaultdict(dict)
     # WARN: we are not resetting lstm state after the episode end
     rnn_state = None
+    prev_action = np.array(0)
+
     for (character, env, seed) in tqdm(env_builder.evaluate()):
         episodes_rewards = []
         for _ in trange(episodes_per_seed, desc="One seed evaluation", leave=False):
@@ -198,11 +210,14 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
                 action, rnn_state = actor.act(
                     tty_chars=obs["tty_chars"],
                     tty_colors=obs["tty_colors"],
+                    prev_actions=prev_action,
                     state=rnn_state,
                     device=device
                 )
                 obs, reward, done, _ = env.step(action)
                 episode_reward += reward
+                prev_action = action
+
             episodes_rewards.append(episode_reward)
 
         eval_stats[character][seed] = np.mean(episodes_rewards)
@@ -251,7 +266,8 @@ def train(config: TrainConfig):
         batch_size=config.batch_size,
         seq_len=config.seq_len,
         n_workers=config.n_workers,
-        auto_ascend_cls=SAAutoAscendTTYDataset
+        auto_ascend_cls=SAAutoAscendTTYDataset,
+        prev_action=True
     )
     actor = Actor(
         action_dim=env_builder.get_action_dim(),
@@ -291,7 +307,7 @@ def train(config: TrainConfig):
     loader_iter = iter(loader)
     for step in trange(config.update_steps, desc="Training"):
         # with timeit() as timer:
-        tty_chars, tty_colors, tty_cursor, actions = next(loader_iter)
+        tty_chars, tty_colors, tty_cursor, actions, prev_action = next(loader_iter)
 
         # wandb.log({
         #     "times/batch_loading_cpu": timer.elapsed_time_cpu,
@@ -300,9 +316,12 @@ def train(config: TrainConfig):
 
         # with timeit() as timer:
         with torch.cuda.amp.autocast():
+            prev_actions = torch.cat([prev_action.unsqueeze(-1), actions[:, :-1]], dim=1)
+
             logits, rnn_state = actor(
                 tty_chars=tty_chars.to(torch.int).to(DEVICE),
                 tty_colors=tty_colors.to(torch.int).to(DEVICE),
+                prev_actions=prev_actions.to(torch.long).to(DEVICE),
                 state=rnn_state
             )
             rnn_state = [a.detach() for a in rnn_state]

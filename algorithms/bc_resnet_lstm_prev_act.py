@@ -10,6 +10,7 @@ import uuid
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 from tqdm.auto import tqdm, trange
 from collections import defaultdict
@@ -19,13 +20,19 @@ import numpy as np
 from typing import Optional
 from d5rl.datasets.sa_autoascend import SAAutoAscendTTYDataset
 from d5rl.tasks import make_task_builder
-from d5rl.utils.observations import num_chars, num_colors
 from d5rl.utils.roles import Alignment, Race, Role, Sex
-from d5rl.nn.perceiver.perceiver import Perceiver
+from d5rl.nn.resnet import ResNet11, ResNet20, ResNet38, ResNet56, ResNet110
+
+torch.backends.cudnn.benchmark = True
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+# TODO:
+#   1. implement filtering of params for the weight decay groups
+#   2. oncycle rl scheduler
+#   3. ...
+#   4. label smoothing for cross entropy loss
 class timeit:
     def __enter__(self):
         self.start_gpu = torch.cuda.Event(enable_timing=True)
@@ -41,40 +48,29 @@ class timeit:
         self.elapsed_time_cpu = time.time() - self.start_cpu
 
 
-# TODO: add cursor observation
-# TODO: add prev action to the lstm
-# TODO: add lr scheduler + warmup
 @dataclass
 class TrainConfig:
-    env: str = "Perceiver-NetHackScore-v0-tty-bot-v0"
+    env: str = "NetHackScore-v0-tty-bot-v0"
     data_path: str = "data/nle_data"
     db_path: str = "ttyrecs.db"
     # Wandb logging
     project: str = "NeuralNetHack"
-    group: str = "PerceiverBC"
-    name: str = "PerceiverBC"
+    group: str = "DummyBC"
+    name: str = "DummyBC"
     version: str = "v0"
     # Model
-    embedding_dim: int = 64
-    per_hidden_dim: int = 64
-    per_latent_len: int = 64
-    per_out_dim: int = 256
-    per_cross_trans_heads: int = 4
-    per_latent_trans_heads: int = 4
-    per_latent_trans_layers: int = 1
-    per_depth: int = 3
-    per_share_weights: bool = True
-    per_num_bands = 16
-    lstm_layers: int = 1
-    lstm_hidden_dim: int = 1024
+    resnet_type: str = "ResNet11"
+    lstm_layers: int = 2
+    hidden_dim: int = 512
+    width_k: int = 2
     # Training
-    update_steps: int = 500_000
+    update_steps: int = 180_000
     batch_size: int = 64
     seq_len: int = 32
     n_workers: int = 16
     learning_rate: float = 3e-4
     weight_decay: float = 0.0
-    clip_grad_norm: Optional[float] = 100.0
+    clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
     eval_every: int = 10_000
     eval_episodes_per_seed: int = 1
@@ -107,78 +103,42 @@ def orthogonal_init(lstm: nn.LSTM, gain=1.0):
             nn.init.orthogonal_(param[hidden_dim * 3:], gain)
 
 
-# TODO: for now without a cursor observation. I should think how to encode it properly.
 class Actor(nn.Module):
-    def __init__(
-            self,
-            action_dim,
-            emb_dim=64,
-            per_hidden_dim=256,
-            per_latent_len=128,
-            per_out_dim=512,
-            per_cross_trans_heads=1,
-            per_latent_trans_heads=4,
-            per_latent_trans_layers=1,
-            per_depth=6,
-            per_share_weights=True,
-            per_num_bands=4,
-            lstm_hidden_dim=256,
-            lstm_layers=1,
-    ):
+    def __init__(self, action_dim, hidden_dim, lstm_layers, width_k, resnet_type):
         super().__init__()
-        self.chars_emb = nn.Embedding(num_chars(), emb_dim)
-        self.colors_emb = nn.Embedding(num_colors(), emb_dim)
-        self.perceiver = Perceiver(
-            img_shape=(24, 80),
-            input_dim=2 * emb_dim,      # * 2 for char and color emb concat
-            hidden_dim=per_hidden_dim,
-            latent_len=per_latent_len,
-            out_dim=per_out_dim,
-            cross_trans_heads=per_cross_trans_heads,
-            latent_trans_heads=per_latent_trans_heads,
-            latent_trans_layers=per_latent_trans_layers,
-            depth=per_depth,
-            share_weights=per_share_weights,
-            num_bands=per_num_bands
-        )
+        resnet = getattr(sys.modules[__name__], resnet_type)
+        self.state_encoder = resnet(img_channels=2, out_dim=hidden_dim, k=width_k)
         self.rnn = nn.LSTM(
-            input_size=per_out_dim,
-            hidden_size=lstm_hidden_dim,
+            input_size=hidden_dim + action_dim,
+            hidden_size=hidden_dim,
             num_layers=lstm_layers,
             batch_first=True
         )
         orthogonal_init(self.rnn)
-        self.head = nn.Linear(lstm_hidden_dim, action_dim)
+        self.head = nn.Linear(hidden_dim, action_dim)
+        self.action_dim = action_dim
 
-    def forward(self, tty_chars, tty_colors, state=None):
+    def forward(self, obs, prev_actions, state=None):
         # [batch_size, seq_len, ...]
-        batch_size, seq_len, H, W = tty_chars.shape
-        # TODO: mb we should add pos emb for chars and colors separately?
+        batch_size, seq_len, *_ = obs.shape
 
-        # [batch_size, seq_len, H * W, emb_dim]
-        embed_chars = self.chars_emb(tty_chars).view(batch_size, seq_len, H * W, -1)
-        embed_colors = self.colors_emb(tty_colors).view(batch_size, seq_len, H * W, -1)
-        # [batch_size, seq_len, H * W, 2 * emb_dim]
-        embed = torch.cat([embed_chars, embed_colors], dim=-1)
-        # [batch_size, seq_len, per_out_dim]
-        per_out = self.perceiver(embed.flatten(0, 1)).view(batch_size, seq_len, -1)
-        # [batch_size, seq_len, lstm_hidden_dim]
-        lstm_out, new_state = self.rnn(per_out, state)
-        # [batch_size, seq_len, num_actions]
-        logits = self.head(lstm_out)
+        out = self.state_encoder(obs.flatten(0, 1)).view(batch_size, seq_len, -1)
+
+        prev_actions = F.one_hot(prev_actions, num_classes=self.action_dim)
+        out = torch.cat([out, prev_actions], dim=-1)
+
+        out, new_state = self.rnn(out, state)
+        logits = self.head(out)
 
         return logits, new_state
 
     @torch.no_grad()
-    def act(self, tty_chars, tty_colors, state=None, device="cpu"):
-        assert tty_chars.ndim == 2 and tty_colors.ndim == 2, "act only for single obs"
-        tty_chars = torch.tensor(tty_chars, device=device, dtype=torch.int)
-        tty_colors = torch.tensor(tty_colors, device=device, dtype=torch.int)
-        logits, new_state = self(
-            tty_chars=tty_chars[None, None, ...],
-            tty_colors=tty_colors[None, None, ...],
-            state=state
-        )
+    def act(self, obs, prev_actions, state=None, device="cpu"):
+        assert obs.ndim == 3, "act only for single obs"
+        obs = torch.tensor(obs, device=device, dtype=torch.float32).permute(2, 0, 1)
+        prev_actions = torch.tensor(prev_actions, device=device, dtype=torch.long)
+
+        logits, new_state = self(obs[None, None, ...], prev_actions[None, None, ...], state)
         return torch.argmax(logits).cpu().item(), new_state
 
 
@@ -186,8 +146,10 @@ class Actor(nn.Module):
 def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
     actor.eval()
     eval_stats = defaultdict(dict)
-    # WARN: we are not resetting lstm state after the episode end
+
     rnn_state = None
+    prev_action = np.array(0)
+
     for (character, env, seed) in tqdm(env_builder.evaluate()):
         episodes_rewards = []
         for _ in trange(episodes_per_seed, desc="One seed evaluation", leave=False):
@@ -195,14 +157,10 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
 
             obs, done, episode_reward = env.reset(), False, 0.0
             while not done:
-                action, rnn_state = actor.act(
-                    tty_chars=obs["tty_chars"],
-                    tty_colors=obs["tty_colors"],
-                    state=rnn_state,
-                    device=device
-                )
+                action, rnn_state = actor.act(obs[..., :2], prev_action, rnn_state, device=device)
                 obs, reward, done, _ = env.step(action)
                 episode_reward += reward
+                prev_action = action
             episodes_rewards.append(episode_reward)
 
         eval_stats[character][seed] = np.mean(episodes_rewards)
@@ -251,22 +209,15 @@ def train(config: TrainConfig):
         batch_size=config.batch_size,
         seq_len=config.seq_len,
         n_workers=config.n_workers,
-        auto_ascend_cls=SAAutoAscendTTYDataset
+        auto_ascend_cls=SAAutoAscendTTYDataset,
+        prev_action=True,
     )
     actor = Actor(
+        resnet_type=config.resnet_type,
         action_dim=env_builder.get_action_dim(),
-        emb_dim=config.embedding_dim,
-        per_hidden_dim=config.per_hidden_dim,
-        per_latent_len=config.per_latent_len,
-        per_out_dim=config.per_out_dim,
-        per_cross_trans_heads=config.per_cross_trans_heads,
-        per_latent_trans_heads=config.per_latent_trans_heads,
-        per_latent_trans_layers=config.per_latent_trans_layers,
-        per_depth=config.per_depth,
-        per_share_weights=config.per_share_weights,
-        per_num_bands=config.per_num_bands,
-        lstm_hidden_dim=config.lstm_hidden_dim,
+        hidden_dim=config.hidden_dim,
         lstm_layers=config.lstm_layers,
+        width_k=config.width_k,
     ).to(DEVICE)
     print("Number of parameters:",  sum(p.numel() for p in actor.parameters()))
     # ONLY FOR MLC/TRS
@@ -291,7 +242,7 @@ def train(config: TrainConfig):
     loader_iter = iter(loader)
     for step in trange(config.update_steps, desc="Training"):
         # with timeit() as timer:
-        tty_chars, tty_colors, tty_cursor, actions = next(loader_iter)
+        tty_chars, tty_colors, tty_cursor, actions, prev_action = next(loader_iter)
 
         # wandb.log({
         #     "times/batch_loading_cpu": timer.elapsed_time_cpu,
@@ -300,9 +251,12 @@ def train(config: TrainConfig):
 
         # with timeit() as timer:
         with torch.cuda.amp.autocast():
+            prev_actions = torch.cat([prev_action.unsqueeze(-1), actions[:, :-1]], dim=1)
+            states = torch.stack([tty_chars, tty_colors], axis=-1)
+
             logits, rnn_state = actor(
-                tty_chars=tty_chars.to(torch.int).to(DEVICE),
-                tty_colors=tty_colors.to(torch.int).to(DEVICE),
+                obs=states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
+                prev_actions=prev_actions.to(DEVICE).to(torch.long),
                 state=rnn_state
             )
             rnn_state = [a.detach() for a in rnn_state]
