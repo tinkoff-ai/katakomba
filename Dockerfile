@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.7.1-cudnn8-devel-ubuntu20.04
+FROM nvidia/cuda:11.3.0-devel-ubuntu20.04
 WORKDIR /workspace
 
 RUN #rm /etc/apt/sources.list.d/cuda.list
@@ -35,8 +35,8 @@ ENV LD_LIBRARY_PATH /root/.mujoco/mujoco210/bin:${LD_LIBRARY_PATH}
 
 # installing dependencies, optional mujoco_py compilation
 COPY requirements.txt requirements.txt
-RUN pip install --pre torch --force-reinstall --index-url https://download.pytorch.org/whl/nightly/cu117
-RUN pip install -r requirements.txt
+RUN pip3 install --pre torch --force-reinstall --index-url https://download.pytorch.org/whl/nightly/cu117
+RUN pip3 install -r requirements.txt
 
 RUN python3 -c "import mujoco_py"
 
@@ -66,4 +66,4 @@ RUN apt-get update && apt-get install -yq \
 COPY . /opt/nle
 
 # Install package
-RUN pip install nle
+RUN pip3 install nle

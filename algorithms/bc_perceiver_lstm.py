@@ -19,6 +19,7 @@ import numpy as np
 from typing import Optional
 from d5rl.datasets.sa_autoascend import SAAutoAscendTTYDataset
 from d5rl.tasks import make_task_builder
+from d5rl.utils.observations import num_chars, num_colors
 from d5rl.utils.roles import Alignment, Race, Role, Sex
 from d5rl.nn.perceiver.perceiver import Perceiver
 
@@ -27,11 +28,6 @@ torch.backends.cudnn.benchmark = True
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-# TODO:
-#   1. implement filtering of params for the weight decay groups
-#   2. oncycle rl scheduler
-#   3. ...
-#   4. label smoothing for cross entropy loss
 class timeit:
     def __enter__(self):
         self.start_gpu = torch.cuda.Event(enable_timing=True)
@@ -54,15 +50,21 @@ class TrainConfig:
     db_path: str = "ttyrecs.db"
     # Wandb logging
     project: str = "NeuralNetHack"
-    group: str = "DummyBC"
-    name: str = "DummyBC"
+    group: str = "PerceiverBC"
+    name: str = "PerceiverBC"
     version: str = "v0"
     # Model
-    resnet_type: str = "ResNet20"
+    embedding_dim: int = 64
+    per_hidden_dim: int = 128
+    per_latent_len: int = 128
+    per_out_dim: int = 256
+    per_cross_trans_heads: int = 1
+    per_latent_trans_heads: int = 4
+    per_latent_trans_layers: int = 1
+    per_depth = 2
+    per_num_bands = 4
     lstm_layers: int = 1
-    hidden_dim: int = 1024
-    width_k: int = 1
-    chrono_init_tmax: Optional[int] = None
+    lstm_hidden_dim: int = 256
     # Training
     update_steps: int = 180_000
     batch_size: int = 256
@@ -91,88 +93,84 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
 
 
-def chrono_init(lstm: nn.LSTM, t_max=100):
-    """
-        Reference: https://arxiv.org/pdf/1804.11188.pdf
-    """
-    for name, p in lstm.named_parameters():
-        if "bias_ih" in name:
-            torch.nn.init.zeros_(p)
-            p.requires_grad_(False)
-        elif "bias_hh" in name:
-            hidden_size = p.nelement() // 4
-            torch.nn.init.zeros_(p)
-            # init forget gate
-            p.data[hidden_size: 2 * hidden_size].data.copy_(
-                torch.Tensor(hidden_size).uniform_(1.0, t_max - 1).log()
-            )
-            # init input gate
-            p.data[:hidden_size] = -p.data[hidden_size: 2 * hidden_size]
+def orthogonal_init(lstm: nn.LSTM, gain=1.0):
+    for name, param in lstm.named_parameters():
+        if "bias" in name:
+            nn.init.constant_(param, 0)
+        elif "weight" in name:
+            hidden_dim = param.shape[0] // 4
+            nn.init.orthogonal_(param[:hidden_dim], gain)
+            nn.init.orthogonal_(param[hidden_dim:hidden_dim * 2], gain)
+            nn.init.orthogonal_(param[hidden_dim * 2:hidden_dim * 3], gain)
+            nn.init.orthogonal_(param[hidden_dim * 3:], gain)
 
 
+# TODO: for now without a cursor observation. I should think how to encode it properly.
 class Actor(nn.Module):
-    def __init__(self, action_dim, hidden_dim, lstm_layers, width_k, resnet_type, chrono_init_tmax=None):
+    def __init__(
+            self,
+            action_dim,
+            emb_dim=64,
+            per_hidden_dim=256,
+            per_latent_len=128,
+            per_out_dim=512,
+            per_cross_trans_heads=1,
+            per_latent_trans_heads=4,
+            per_latent_trans_layers=1,
+            per_depth=6,
+            per_num_bands=4,
+            lstm_hidden_dim=256,
+            lstm_layers=1,
+    ):
         super().__init__()
-        resnet = getattr(sys.modules[__name__], resnet_type)
-        self.state_encoder = resnet(img_channels=2, out_dim=hidden_dim, k=width_k)
-        self.norm = nn.LayerNorm(hidden_dim)
+        self.chars_emb = nn.Embedding(num_chars(), emb_dim)
+        self.colors_emb = nn.Embedding(num_colors(), emb_dim)
+        self.perceiver = Perceiver(
+            img_shape=(24, 80),
+            input_dim=2 * emb_dim,      # * 2 for char and color emb concat
+            hidden_dim=per_hidden_dim,
+            latent_len=per_latent_len,
+            out_dim=per_out_dim,
+            cross_trans_heads=per_cross_trans_heads,
+            latent_trans_heads=per_latent_trans_heads,
+            latent_trans_layers=per_latent_trans_layers,
+            depth=per_depth,
+            num_bands=per_num_bands
+        )
         self.rnn = nn.LSTM(
-            input_size=hidden_dim,
-            hidden_size=hidden_dim,
+            input_size=per_out_dim,
+            hidden_size=lstm_hidden_dim,
             num_layers=lstm_layers,
             batch_first=True
         )
-        if chrono_init_tmax is not None:
-            chrono_init(self.rnn, t_max=chrono_init_tmax)
+        orthogonal_init(self.rnn)
+        self.head = nn.Linear(lstm_hidden_dim, action_dim)
 
-        # TODO: ortho/chrono init for the lstm
-        self.head = nn.Linear(hidden_dim, action_dim)
-
-    def forward(self, obs, state=None):
+    def forward(self, tty_chars, tty_colors, state=None):
         # [batch_size, seq_len, ...]
-        batch_size, seq_len, *_ = obs.shape
+        batch_size, seq_len, H, W = tty_chars.shape
+        # TODO: mb we should add pos emb for chars and colors separately?
 
-        out = self.state_encoder(obs.flatten(0, 1)).view(batch_size, seq_len, -1)
-        out, new_state = self.rnn(self.norm(out), state)
-        logits = self.head(out)
+        # [batch_size, seq_len, H * W, emb_dim]
+        embed_chars = self.chars_emb(tty_chars).view(batch_size, seq_len, H * W, -1)
+        embed_colors = self.colors_emb(tty_colors).view(batch_size, seq_len, H * W, -1)
+        # [batch_size, seq_len, H * W, 2 * emb_dim]
+        embed = torch.cat([embed_chars, embed_colors], dim=-1)
+        # [batch_size, seq_len, per_out_dim]
+        per_out = self.perceiver(embed.flatten(0, 1)).view(batch_size, seq_len, -1)
+        # [batch_size, seq_len, lstm_hidden_dim]
+        lstm_out, new_state = self.rnn(per_out, state)
+        # [batch_size, seq_len, num_actions]
+        logits = self.head(lstm_out)
 
         return logits, new_state
 
-    @torch.no_grad()
-    def act(self, obs, state=None, device="cpu"):
-        assert obs.ndim == 3, "act only for single obs"
-        obs = torch.tensor(obs, device=device, dtype=torch.float32).permute(2, 0, 1)
-        logits, new_state = self(obs[None, None, ...], state)
-        return torch.argmax(logits).cpu().item(), new_state
-
-
-@torch.no_grad()
-def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
-    actor.eval()
-    eval_stats = defaultdict(dict)
-
-    for (character, env, seed) in tqdm(env_builder.evaluate()):
-        episodes_rewards = []
-        for _ in trange(episodes_per_seed, desc="One seed evaluation", leave=False):
-            env.seed(seed, reseed=False)
-
-            obs, done, episode_reward = env.reset(), False, 0.0
-            rnn_state = None
-
-            while not done:
-                action, rnn_state = actor.act(obs[..., :2], rnn_state, device=device)
-                obs, reward, done, _ = env.step(action)
-                episode_reward += reward
-            episodes_rewards.append(episode_reward)
-
-        eval_stats[character][seed] = np.mean(episodes_rewards)
-
-    # for each character also log mean across all seeds
-    for character in eval_stats.keys():
-        eval_stats[character]["mean_return"] = np.mean(list(eval_stats[character].values()))
-
-    actor.train()
-    return eval_stats
+    # @torch.no_grad()
+    # def act(self, obs, state=None, device="cpu"):
+    #     assert obs.ndim == 3, "act only for single obs"
+    #     obs = torch.tensor(obs, device=device, dtype=torch.float32).permute(2, 0, 1)
+    #     logits, new_state = self(obs[None, None, ...], state)
+    #     return torch.argmax(logits).cpu().item(), new_state
 
 
 @pyrallis.wrap()
@@ -214,16 +212,23 @@ def train(config: TrainConfig):
         auto_ascend_cls=SAAutoAscendTTYDataset
     )
     actor = Actor(
-        resnet_type=config.resnet_type,
         action_dim=env_builder.get_action_dim(),
-        hidden_dim=config.hidden_dim,
+        emb_dim=config.embedding_dim,
+        per_hidden_dim=config.per_hidden_dim,
+        per_latent_len=config.per_latent_len,
+        per_out_dim=config.per_out_dim,
+        per_cross_trans_heads=config.per_cross_trans_heads,
+        per_latent_trans_heads=config.per_latent_trans_heads,
+        per_latent_trans_layers=config.per_latent_trans_layers,
+        per_depth=config.per_depth,
+        per_num_bands=config.per_num_bands,
+        lstm_hidden_dim=config.lstm_hidden_dim,
         lstm_layers=config.lstm_layers,
-        width_k=config.width_k,
-        chrono_init_tmax=config.chrono_init_tmax
     ).to(DEVICE)
     print("Number of parameters:",  sum(p.numel() for p in actor.parameters()))
     # ONLY FOR MLC/TRS
     # actor = torch.compile(actor, mode="reduce-overhead")
+
     optim = torch.optim.AdamW(
         (p for p in actor.parameters() if p.requires_grad),
         lr=config.learning_rate,
@@ -237,62 +242,68 @@ def train(config: TrainConfig):
         batch_size=None,
         pin_memory=True
     )
-    scaler = torch.cuda.amp.GradScaler()
+    # scaler = torch.cuda.amp.GradScaler()
 
     rnn_state = None
     loader_iter = iter(loader)
     for step in trange(config.update_steps, desc="Training"):
-        with timeit() as timer:
-            tty_chars, tty_colors, tty_cursor, actions = next(loader_iter)
+        # with timeit() as timer:
+        tty_chars, tty_colors, tty_cursor, actions = next(loader_iter)
 
-        wandb.log({
-            "times/batch_loading_cpu": timer.elapsed_time_cpu,
-            "times/batch_loading_gpu": timer.elapsed_time_gpu
-        }, step=step)
+        # wandb.log({
+        #     "times/batch_loading_cpu": timer.elapsed_time_cpu,
+        #     "times/batch_loading_gpu": timer.elapsed_time_gpu
+        # }, step=step)
 
-        with timeit() as timer:
-            with torch.cuda.amp.autocast():
-                states = torch.stack([tty_chars, tty_colors], axis=-1)
-                logits, rnn_state = actor(
-                    states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
-                    state=rnn_state
-                )
-                rnn_state = [a.detach() for a in rnn_state]
+        # with timeit() as timer:
+            # with torch.cuda.amp.autocast():
+        logits, rnn_state = actor(
+            tty_chars=tty_chars.to(torch.int).to(DEVICE),
+            tty_colors=tty_colors.to(torch.int).to(DEVICE),
+            state=rnn_state
+        )
+        rnn_state = [a.detach() for a in rnn_state]
 
-                dist = Categorical(logits=logits)
-                loss = -dist.log_prob(actions.to(DEVICE)).mean()
+        dist = Categorical(logits=logits)
+        loss = -dist.log_prob(actions.to(DEVICE)).mean()
 
-        wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
+        # wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
 
-        with timeit() as timer:
-            scaler.scale(loss).backward()
-            # loss.backward()
-            if config.clip_grad_norm is not None:
-                scaler.unscale_(optim)
-                torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
-            # optim.step()
-            scaler.step(optim)
-            scaler.update()
-            optim.zero_grad(set_to_none=True)
+        # with timeit() as timer:
+        # scaler.scale(loss).backward()
+        loss.backward()
+        if config.clip_grad_norm is not None:
+            # scaler.unscale_(optim)
+            torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
+        optim.step()
+        # scaler.step(optim)
+        # scaler.update()
+        optim.zero_grad(set_to_none=True)
 
-        wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
+        # wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
 
         wandb.log({
             "loss": loss.detach().item(),
             "transitions": config.batch_size * config.seq_len * step
         }, step=step)
 
-        if (step + 1) % config.eval_every == 0:
-            eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
-            wandb.log(
-                dict(eval_stats, **{"transitions": config.batch_size * config.seq_len * step}), step=step)
-
-            if config.checkpoints_path is not None:
-                torch.save(
-                    actor.state_dict(),
-                    os.path.join(config.checkpoints_path, f"{step}.pt"),
-                )
+        # if (step + 1) % config.eval_every == 0:
+        #     eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
+        #     wandb.log(
+        #         dict(eval_stats, **{"transitions": config.batch_size * config.seq_len * step}), step=step)
+        #
+        #     if config.checkpoints_path is not None:
+        #         torch.save(
+        #             actor.state_dict(),
+        #             os.path.join(config.checkpoints_path, f"{step}.pt"),
+        #         )
 
 
 if __name__ == "__main__":
+    # model = Actor(action_dim=100)
+    # print(sum(p.numel() for p in model.parameters()))
+    #
+    # chars = torch.randint(0, num_chars(), size=(2, 3, 24, 80))
+    # colors = torch.randint(0, num_colors(), size=(2, 3, 24, 80))
+    # model(chars, colors)
     train()

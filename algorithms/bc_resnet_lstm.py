@@ -62,7 +62,6 @@ class TrainConfig:
     lstm_layers: int = 1
     hidden_dim: int = 1024
     width_k: int = 1
-    chrono_init_tmax: Optional[int] = 5000.0
     # Training
     update_steps: int = 180_000
     batch_size: int = 256
@@ -91,27 +90,20 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
 
 
-def chrono_init(lstm: nn.LSTM, t_max=100):
-    """
-        Reference: https://arxiv.org/pdf/1804.11188.pdf
-    """
-    for name, p in lstm.named_parameters():
-        if "bias_ih" in name:
-            torch.nn.init.zeros_(p)
-            p.requires_grad_(False)
-        elif "bias_hh" in name:
-            hidden_size = p.nelement() // 4
-            torch.nn.init.zeros_(p)
-            # init forget gate
-            p.data[hidden_size: 2 * hidden_size].data.copy_(
-                torch.Tensor(hidden_size).uniform_(1.0, t_max - 1).log()
-            )
-            # init input gate
-            p.data[:hidden_size] = -p.data[hidden_size: 2 * hidden_size]
+def orthogonal_init(lstm: nn.LSTM, gain=1.0):
+    for name, param in lstm.named_parameters():
+        if "bias" in name:
+            nn.init.constant_(param, 0)
+        elif "weight" in name:
+            hidden_dim = param.shape[0] // 4
+            nn.init.orthogonal_(param[:hidden_dim], gain)
+            nn.init.orthogonal_(param[hidden_dim:hidden_dim * 2], gain)
+            nn.init.orthogonal_(param[hidden_dim * 2:hidden_dim * 3], gain)
+            nn.init.orthogonal_(param[hidden_dim * 3:], gain)
 
 
 class Actor(nn.Module):
-    def __init__(self, action_dim, hidden_dim, lstm_layers, width_k, resnet_type, chrono_init_tmax=None):
+    def __init__(self, action_dim, hidden_dim, lstm_layers, width_k, resnet_type):
         super().__init__()
         resnet = getattr(sys.modules[__name__], resnet_type)
         self.state_encoder = resnet(img_channels=2, out_dim=hidden_dim, k=width_k)
@@ -122,10 +114,7 @@ class Actor(nn.Module):
             num_layers=lstm_layers,
             batch_first=True
         )
-        if chrono_init_tmax is not None:
-            chrono_init(self.rnn, t_max=chrono_init_tmax)
-
-        # TODO: ortho/chrono init for the lstm
+        orthogonal_init(self.rnn)
         self.head = nn.Linear(hidden_dim, action_dim)
 
     def forward(self, obs, state=None):
@@ -219,7 +208,6 @@ def train(config: TrainConfig):
         hidden_dim=config.hidden_dim,
         lstm_layers=config.lstm_layers,
         width_k=config.width_k,
-        chrono_init_tmax=config.chrono_init_tmax
     ).to(DEVICE)
     print("Number of parameters:",  sum(p.numel() for p in actor.parameters()))
     # ONLY FOR MLC/TRS

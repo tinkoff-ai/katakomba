@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from pos_emb import generate_fourier_pos_encoding
+from .pos_emb import generate_fourier_pos_encoding
 
 
 # standard transformer block, but without a dropout
