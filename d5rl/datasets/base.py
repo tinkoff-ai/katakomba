@@ -8,12 +8,12 @@ class BaseAutoAscend(IterableDataset):
         autoascend_iterator_cls,
         ttyrecdata: TtyrecDataset,
         batch_size: int,
-        **kwawgs
+        **kwargs
     ):
         self._autoascend_iterator_cls = autoascend_iterator_cls
         self._ttyrecdata = ttyrecdata
         self._batch_size = batch_size
-        self._kwargs = kwawgs
+        self._kwargs = kwargs
 
     def __iter__(self):
         return iter(

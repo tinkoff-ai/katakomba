@@ -5,21 +5,24 @@ from typing import Tuple
 from d5rl.datasets.builder import AutoAscendDatasetBuilder
 from d5rl.envs import NetHackChallenge
 from d5rl.envs.builder import NetHackEnvBuilder
-from d5rl.wrappers import TTYWrapper
+from d5rl.wrappers import TTYWrapper, CropRenderWrapper
 
 TASKS = {
     "NetHackScore-v0-tty-bot-v0": {
         "env_fn": NetHackChallenge,
         "wrapper_fn": TTYWrapper,
         "dataset_builder_fn": AutoAscendDatasetBuilder,
-    }
+    },
+    "NetHackScore-v0-ttyimg-bot-v0": {
+        "env_fn": NetHackChallenge,
+        "wrapper_fn": CropRenderWrapper,
+        "dataset_builder_fn": AutoAscendDatasetBuilder,
+    },
 }
 
 
 def make_task_builder(
-        task: str,
-        data_path: str = "data/nle_data",
-        db_path: str = "ttyrecs.db"
+    task: str, data_path: str = "data/nle_data", db_path: str = "ttyrecs.db"
 ) -> Tuple[NetHackEnvBuilder, AutoAscendDatasetBuilder]:
     """
     Creates environment and dataset builders for a task, which you can further configure for your needs.
@@ -31,4 +34,6 @@ def make_task_builder(
     wrapper_fn = TASKS[task]["wrapper_fn"]
     dataset_builder_fn = TASKS[task]["dataset_builder_fn"]
 
-    return NetHackEnvBuilder(env_fn, wrapper_fn), dataset_builder_fn(path=data_path, db_path=db_path)
+    return NetHackEnvBuilder(env_fn, wrapper_fn), dataset_builder_fn(
+        path=data_path, db_path=db_path
+    )

@@ -19,13 +19,15 @@ class _SAAutoAscendTTYIterator:
             batch = next(self._ttyrecdata)
             # actions = ascii_actions_to_gym_actions(batch["keypresses"])
             # actions = batch["keypresses"]
-            actions = np.take_along_axis(self.action_mapping, batch["keypresses"], axis=0)
+            actions = np.take_along_axis(
+                self.action_mapping, batch["keypresses"], axis=0
+            )
 
             yield (
                 batch["tty_chars"],
                 batch["tty_colors"],
                 batch["tty_cursor"],
-                actions
+                actions,
             )
 
 

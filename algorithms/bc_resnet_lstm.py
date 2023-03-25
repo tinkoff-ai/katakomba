@@ -79,7 +79,9 @@ class TrainConfig:
         self.group = f"{self.group}-{self.env}-{self.version}"
         self.name = f"{self.name}-{str(uuid.uuid4())[:8]}"
         if self.checkpoints_path is not None:
-            self.checkpoints_path = os.path.join(self.checkpoints_path, self.group, self.name)
+            self.checkpoints_path = os.path.join(
+                self.checkpoints_path, self.group, self.name
+            )
 
 
 def set_seed(seed: int):
@@ -99,7 +101,7 @@ class Actor(nn.Module):
             input_size=hidden_dim,
             hidden_size=hidden_dim,
             num_layers=lstm_layers,
-            batch_first=True
+            batch_first=True,
         )
         # TODO: ortho/chrono init for the lstm
         self.head = nn.Linear(hidden_dim, action_dim)
@@ -145,7 +147,9 @@ def evaluate(env_builder, actor, episodes_per_seed, device="cpu"):
 
     # for each character also log mean across all seeds
     for character in eval_stats.keys():
-        eval_stats[character]["mean_return"] = np.mean(list(eval_stats[character].values()))
+        eval_stats[character]["mean_return"] = np.mean(
+            list(eval_stats[character].values())
+        )
 
     actor.train()
     return eval_stats
@@ -162,7 +166,7 @@ def train(config: TrainConfig):
         group=config.group,
         name=config.name,
         id=str(uuid.uuid4()),
-        save_code=True
+        save_code=True,
     )
     if config.checkpoints_path is not None:
         print(f"Checkpoints path: {config.checkpoints_path}")
@@ -172,9 +176,7 @@ def train(config: TrainConfig):
 
     set_seed(config.train_seed)
     env_builder, dataset_builder = make_task_builder(
-        config.env,
-        data_path=config.data_path,
-        db_path=config.db_path
+        config.env, data_path=config.data_path, db_path=config.db_path
     )
     env_builder = (
         env_builder.roles([Role.MONK])
@@ -187,16 +189,16 @@ def train(config: TrainConfig):
         batch_size=config.batch_size,
         seq_len=config.seq_len,
         n_workers=config.n_workers,
-        auto_ascend_cls=SAAutoAscendTTYDataset
+        auto_ascend_cls=SAAutoAscendTTYDataset,
     )
     actor = Actor(
         resnet_type=config.resnet_type,
         action_dim=env_builder.get_action_dim(),
         hidden_dim=config.hidden_dim,
         lstm_layers=config.lstm_layers,
-        width_k=config.width_k
+        width_k=config.width_k,
     ).to(DEVICE)
-    print("Number of parameters:",  sum(p.numel() for p in actor.parameters()))
+    print("Number of parameters:", sum(p.numel() for p in actor.parameters()))
     # ONLY FOR MLC/TRS
     # actor = torch.compile(actor, mode="reduce-overhead")
     optim = torch.optim.AdamW(actor.parameters(), lr=config.learning_rate)
@@ -206,7 +208,7 @@ def train(config: TrainConfig):
         # Disable automatic batching
         batch_sampler=None,
         batch_size=None,
-        pin_memory=True
+        pin_memory=True,
     )
     scaler = torch.cuda.amp.GradScaler()
 
@@ -216,17 +218,20 @@ def train(config: TrainConfig):
         with timeit() as timer:
             tty_chars, tty_colors, tty_cursor, actions = next(loader_iter)
 
-        wandb.log({
-            "times/batch_loading_cpu": timer.elapsed_time_cpu,
-            "times/batch_loading_gpu": timer.elapsed_time_gpu
-        }, step=step)
+        wandb.log(
+            {
+                "times/batch_loading_cpu": timer.elapsed_time_cpu,
+                "times/batch_loading_gpu": timer.elapsed_time_gpu,
+            },
+            step=step,
+        )
 
         with timeit() as timer:
             with torch.cuda.amp.autocast():
                 states = torch.stack([tty_chars, tty_colors], axis=-1)
                 logits, rnn_state = actor(
                     states.permute(0, 1, 4, 2, 3).to(DEVICE).to(torch.float32),
-                    state=rnn_state
+                    state=rnn_state,
                 )
                 rnn_state = [a.detach() for a in rnn_state]
 
@@ -240,7 +245,9 @@ def train(config: TrainConfig):
             # loss.backward()
             if config.clip_grad_norm is not None:
                 scaler.unscale_(optim)
-                torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
+                torch.nn.utils.clip_grad_norm_(
+                    actor.parameters(), config.clip_grad_norm
+                )
             # optim.step()
             scaler.step(optim)
             scaler.update()
@@ -248,15 +255,25 @@ def train(config: TrainConfig):
 
         wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
 
-        wandb.log({
-            "loss": loss.detach().item(),
-            "transitions": config.batch_size * config.seq_len * step
-        }, step=step)
+        wandb.log(
+            {
+                "loss": loss.detach().item(),
+                "transitions": config.batch_size * config.seq_len * step,
+            },
+            step=step,
+        )
 
         if (step + 1) % config.eval_every == 0:
-            eval_stats = evaluate(env_builder, actor, config.eval_episodes_per_seed, device=DEVICE)
+            eval_stats = evaluate(
+                env_builder, actor, config.eval_episodes_per_seed, device=DEVICE
+            )
             wandb.log(
-                dict(eval_stats, **{"transitions": config.batch_size * config.seq_len * step}), step=step)
+                dict(
+                    eval_stats,
+                    **{"transitions": config.batch_size * config.seq_len * step},
+                ),
+                step=step,
+            )
 
             if config.checkpoints_path is not None:
                 torch.save(

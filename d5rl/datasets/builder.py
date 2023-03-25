@@ -17,6 +17,7 @@ import nle.dataset as nld
 
 from d5rl.datasets.base import BaseAutoAscend
 from d5rl.datasets.sars_autoascend import SARSAutoAscendTTYDataset
+from d5rl.datasets.sa_chaotic_autoascend import SAChaoticAutoAscendTTYDataset
 from d5rl.utils.roles import Alignment, Race, Role, Sex
 
 
@@ -102,7 +103,10 @@ class AutoAscendDatasetBuilder:
             threadpool=tp,
         )
         print(f"Total games in the filtered dataset: {len(self._dataset._gameids)}")
-        return auto_ascend_cls(self._dataset, batch_size=batch_size, **kwargs)
+
+        return auto_ascend_cls(
+            self._dataset, batch_size=batch_size, threadpool=tp, **kwargs
+        )
 
     def _build_sql_query(self) -> Tuple[str, Tuple]:
         subselect_sql = "SELECT gameid FROM games WHERE "
