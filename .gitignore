@@ -1,6 +1,17 @@
+# Dev
+dev/
+
 # Data
 data/
 ttyrecs.db
+
+# Misc
+test.py
+test.ipynb
+.ml-job-preset.yml
+mlc_run.sh
+wandb
+algorithms/bc_resnet_lstm_accelerate.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
