@@ -17,10 +17,10 @@ from torch.distributions import Categorical
 import numpy as np
 
 from typing import Optional
-from d5rl.datasets.sa_autoascend import SAAutoAscendTTYDataset
-from d5rl.tasks import make_task_builder
-from d5rl.utils.roles import Alignment, Race, Role, Sex
-from d5rl.nn.resnet import ResNet11, ResNet20, ResNet38, ResNet56, ResNet110
+from katakomba.datasets.sa_autoascend import SAAutoAscendTTYDataset
+from katakomba.tasks import make_task_builder
+from katakomba.utils.roles import Alignment, Race, Role, Sex
+from katakomba.nn.resnet import ResNet11, ResNet20, ResNet38, ResNet56, ResNet110
 
 torch.backends.cudnn.benchmark = True
 

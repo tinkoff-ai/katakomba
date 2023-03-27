@@ -23,11 +23,11 @@ from torch.distributions import Categorical
 import numpy as np
 
 from typing import Optional, Tuple
-from d5rl.datasets.sa_chaotic_autoascend import SAChaoticAutoAscendTTYDataset
-from d5rl.tasks import make_task_builder
-from d5rl.utils.roles import Alignment, Race, Role, Sex
-from d5rl.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
-from d5rl.utils.render import SCREEN_SHAPE
+from katakomba.datasets.sa_chaotic_autoascend import SAChaoticAutoAscendTTYDataset
+from katakomba.tasks import make_task_builder
+from katakomba.utils.roles import Alignment, Race, Role, Sex
+from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
+from katakomba.utils.render import SCREEN_SHAPE
 
 torch.backends.cudnn.benchmark = True
 
@@ -56,8 +56,8 @@ class TrainConfig:
     db_path: str = "ttyrecs.db"
     # Wandb logging
     project: str = "NeuralNetHack"
-    group: str = "DummyBC"
-    name: str = "DummyBC"
+    group: str = "ChaoticDwarfen-BC"
+    name: str = "ChaoticDwarfen-BC"
     version: str = "v0"
     # Training
     update_steps: int = 180_000

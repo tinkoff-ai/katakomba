@@ -6,8 +6,8 @@ from typing import List, Optional
 
 from nle.env.base import NLE
 
-from d5rl.utils.roles import ALLOWED_COMBOS, Alignment, Race, Role, Sex
-from d5rl.wrappers import NetHackWrapper
+from katakomba.utils.roles import ALLOWED_COMBOS, Alignment, Race, Role, Sex
+from katakomba.wrappers import NetHackWrapper
 
 
 class NetHackEnvBuilder:

@@ -1,7 +1,7 @@
 from nle.dataset.dataset import TtyrecDataset
 
-from d5rl.datasets.base import BaseAutoAscend
-from d5rl.utils.observations import tty_to_numpy
+from katakomba.datasets.base import BaseAutoAscend
+from katakomba.utils.observations import tty_to_numpy
 
 
 class _StateAutoAscendIterator:

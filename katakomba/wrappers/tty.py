@@ -3,7 +3,7 @@ import numpy as np
 from nle import nethack
 from nle.env import base
 
-from d5rl.wrappers.base import NetHackWrapper
+from katakomba.wrappers.base import NetHackWrapper
 
 
 class TTYWrapper(NetHackWrapper):

@@ -1,8 +1,8 @@
 import gym
 import numpy as np
 
-from d5rl.utils.render import SCREEN_SHAPE, render_screen_image
-from d5rl.wrappers.base import NetHackWrapper
+from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
+from katakomba.wrappers.base import NetHackWrapper
 
 
 class CropRenderWrapper(NetHackWrapper):

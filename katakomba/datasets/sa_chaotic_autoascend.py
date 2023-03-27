@@ -1,9 +1,9 @@
 import numpy as np
-from d5rl.datasets.base import BaseAutoAscend
+from katakomba.datasets.base import BaseAutoAscend
 from nle.dataset.dataset import TtyrecDataset
 from nle.nethack.actions import ACTIONS
 from concurrent.futures import ThreadPoolExecutor
-from d5rl.utils.render import render_screen_image
+from katakomba.utils.render import render_screen_image
 
 
 class _SAChaoticAutoAscendTTYIterator:

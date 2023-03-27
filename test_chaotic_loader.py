@@ -2,8 +2,8 @@ import time
 
 from torch.utils.data import DataLoader
 
-from d5rl.tasks import make_task_builder
-from d5rl.datasets.sa_chaotic_autoascend import SAChaoticAutoAscendTTYDataset
+from katakomba.tasks import make_task_builder
+from katakomba.datasets.sa_chaotic_autoascend import SAChaoticAutoAscendTTYDataset
 
 
 NUM_BATCHES = 200

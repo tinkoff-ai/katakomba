@@ -15,10 +15,10 @@ from typing import List, Optional, Tuple
 
 import nle.dataset as nld
 
-from d5rl.datasets.base import BaseAutoAscend
-from d5rl.datasets.sars_autoascend import SARSAutoAscendTTYDataset
-from d5rl.datasets.sa_chaotic_autoascend import SAChaoticAutoAscendTTYDataset
-from d5rl.utils.roles import Alignment, Race, Role, Sex
+from katakomba.datasets.base import BaseAutoAscend
+from katakomba.datasets.sars_autoascend import SARSAutoAscendTTYDataset
+from katakomba.datasets.sa_chaotic_autoascend import SAChaoticAutoAscendTTYDataset
+from katakomba.utils.roles import Alignment, Race, Role, Sex
 
 
 class AutoAscendDatasetBuilder:

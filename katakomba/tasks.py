@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Tuple
 
-from d5rl.datasets.builder import AutoAscendDatasetBuilder
-from d5rl.envs import NetHackChallenge
-from d5rl.envs.builder import NetHackEnvBuilder
-from d5rl.wrappers import TTYWrapper, CropRenderWrapper
+from katakomba.datasets.builder import AutoAscendDatasetBuilder
+from katakomba.envs import NetHackChallenge
+from katakomba.envs.builder import NetHackEnvBuilder
+from katakomba.wrappers import TTYWrapper, CropRenderWrapper
 
 TASKS = {
     "NetHackScore-v0-tty-bot-v0": {

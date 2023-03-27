@@ -1,6 +1,6 @@
 import numpy as np
-from d5rl.datasets.base import BaseAutoAscend
-from d5rl.utils.actions import ascii_actions_to_gym_actions
+from katakomba.datasets.base import BaseAutoAscend
+from katakomba.utils.actions import ascii_actions_to_gym_actions
 from nle.dataset.dataset import TtyrecDataset
 from nle.nethack.actions import ACTIONS
 
