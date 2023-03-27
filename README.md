@@ -1,4 +1,5 @@
 # How to install render utils?
 
-```cd katakomba/utils/render_utils/```
-```pip install -e .```
+1. ```cd katakomba/utils/render_utils/```
+
+2. ```pip install -e .```
