@@ -63,7 +63,7 @@ class _SARSChaoticAutoAscendTTYIterator:
             rewards[:, -1] = next_batch[3][:, 1] - rewards[:, -1]
             # As in DD, to the best of my knowledge there should not be transitions leading to lower score
             # however, due to the nature of the data, there is an abrupt move from cur_score to zero in the end of the game
-            rewards = np.clip(rewards, a_min=0)
+            rewards = np.clip(rewards, a_min=0, a_max=None)
 
             yield screen_image, tty_chars, actions, rewards, next_screen_image, next_tty_chars, dones
 
