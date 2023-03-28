@@ -35,17 +35,16 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 class timeit:
     def __enter__(self):
-        # self.start_gpu = torch.cuda.Event(enable_timing=True)
-        # self.end_gpu = torch.cuda.Event(enable_timing=True)
+        self.start_gpu = torch.cuda.Event(enable_timing=True)
+        self.end_gpu = torch.cuda.Event(enable_timing=True)
         self.start_cpu = time.time()
-        # self.start_gpu.record()
+        self.start_gpu.record()
         return self
 
     def __exit__(self, type, value, traceback):
-        # self.end_gpu.record()
-        # torch.cuda.synchronize()
-        # self.elapsed_time_gpu = self.start_gpu.elapsed_time(self.end_gpu) / 1000
-        self.elapsed_time_gpu = 0.0
+        self.end_gpu.record()
+        torch.cuda.synchronize()
+        self.elapsed_time_gpu = self.start_gpu.elapsed_time(self.end_gpu) / 1000
         self.elapsed_time_cpu = time.time() - self.start_cpu
 
 
