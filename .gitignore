@@ -12,6 +12,8 @@ test.ipynb
 mlc_run.sh
 wandb
 algorithms/bc_resnet_lstm_accelerate.py
+wandb_run.sh
+trs_run.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -55,8 +55,8 @@ class TrainConfig:
     db_path: str = "ttyrecs.db"
     # Wandb logging
     project: str = "NeuralNetHack"
-    group: str = "ChaoticDwarfen-BC"
-    name: str = "ChaoticDwarfen-BC"
+    group: str = "BC"
+    name: str = "BC"
     version: str = "v0"
     # Model
     rnn_hidden_dim: int = 512
@@ -302,6 +302,8 @@ def train(config: TrainConfig):
 
                 dist = Categorical(logits=logits)
                 loss = -dist.log_prob(actions).mean()
+                # update prev_actions for next iteration
+                prev_actions = actions[:, -1].unsqueeze(-1)
 
         wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
 
