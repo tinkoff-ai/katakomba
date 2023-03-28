@@ -58,10 +58,12 @@ class TrainConfig:
     train_seed: int = 42
 
     def __post_init__(self):
-        self.group = f"{self.env}-{self.name}-{self.version}"
-        self.name = f"{self.group}-{str(uuid.uuid4())[:8]}"
+        self.group = f"{self.group}-{self.env}-{self.version}"
+        self.name = f"{self.name}-{str(uuid.uuid4())[:8]}"
         if self.checkpoints_path is not None:
-            self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
+            self.checkpoints_path = os.path.join(
+                self.checkpoints_path, self.group, self.name
+            )
 
 
 def set_seed(seed: int):
