@@ -71,17 +71,6 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
 
 
-# def to_device(data, device="cpu"):
-#     if isinstance(data, torch.Tensor):
-#         return data.to(device)
-#     elif isinstance(data, dict):
-#         for k, v in data.items():
-#             assert isinstance(v, torch.Tensor)
-#             data[k] = v.to(device)
-#     else:
-#         raise RuntimeError("Can not move to the device")
-
-
 def soft_update(target, source, tau):
     for tp, sp in zip(target.parameters(), source.parameters()):
         tp.data.copy_((1 - tau) * tp.data + tau * sp.data)
