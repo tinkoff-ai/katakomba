@@ -14,7 +14,6 @@ import os
 import uuid
 import torch
 import torch.nn as nn
-import torch.functional as F
 from torch.utils.data import DataLoader
 
 from tqdm.auto import tqdm, trange
@@ -36,16 +35,17 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 class timeit:
     def __enter__(self):
-        self.start_gpu = torch.cuda.Event(enable_timing=True)
-        self.end_gpu = torch.cuda.Event(enable_timing=True)
+        # self.start_gpu = torch.cuda.Event(enable_timing=True)
+        # self.end_gpu = torch.cuda.Event(enable_timing=True)
         self.start_cpu = time.time()
-        self.start_gpu.record()
+        # self.start_gpu.record()
         return self
 
     def __exit__(self, type, value, traceback):
-        self.end_gpu.record()
-        torch.cuda.synchronize()
-        self.elapsed_time_gpu = self.start_gpu.elapsed_time(self.end_gpu) / 1000
+        # self.end_gpu.record()
+        # torch.cuda.synchronize()
+        # self.elapsed_time_gpu = self.start_gpu.elapsed_time(self.end_gpu) / 1000
+        self.elapsed_time_gpu = 0.0
         self.elapsed_time_cpu = time.time() - self.start_cpu
 
 
@@ -59,6 +59,9 @@ class TrainConfig:
     group: str = "ChaoticDwarfen-BC"
     name: str = "ChaoticDwarfen-BC"
     version: str = "v0"
+    # Model
+    rnn_hidden_dim: int = 512
+    rnn_layers: int = 1
     # Training
     update_steps: int = 180_000
     batch_size: int = 256
@@ -89,10 +92,9 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
 
 
-class ChaoticDwarvenGPT5(nn.Module):
-    def __init__(self, action_dim: int, use_prev_action: bool = True):
-        super(ChaoticDwarvenGPT5, self).__init__()
-
+class BC(nn.Module):
+    def __init__(self, action_dim: int, rnn_hidden_dim: int = 512, rnn_layers: int = 1, use_prev_action: bool = True):
+        super().__init__()
         # Action dimensions and prev actions
         self.num_actions = action_dim
         self.use_prev_action = use_prev_action
@@ -113,22 +115,11 @@ class ChaoticDwarvenGPT5(nn.Module):
                 self.prev_actions_dim,
             ]
         )
-
-        self.hidden_dim = 512
-
         # Policy
-        self.rnn = nn.LSTM(self.h_dim, self.hidden_dim, num_layers=1, batch_first=True)
-        self.head = nn.Linear(self.hidden_dim, self.num_actions)
+        self.rnn = nn.LSTM(self.h_dim, rnn_hidden_dim, num_layers=rnn_layers, batch_first=True)
+        self.head = nn.Linear(rnn_hidden_dim, self.num_actions)
 
-    def initial_state(self, batch_size: int = 1) -> Tuple[torch.Tensor, torch.Tensor]:
-        return tuple(
-            torch.zeros(
-                self.rnn.num_layers, batch_size, self.rnn.hidden_size, device=DEVICE
-            )
-            for _ in range(2)
-        )
-
-    def forward(self, inputs, rnn_state):
+    def forward(self, inputs, state=None):
         B, T, C, H, W = inputs["screen_image"].shape
         topline = inputs["tty_chars"][..., 0, :]
         bottom_line = inputs["tty_chars"][..., -2:, :]
@@ -154,54 +145,52 @@ class ChaoticDwarvenGPT5(nn.Module):
             )
 
         encoded_state = torch.cat(encoded_state, dim=1)
-        core_output, rnn_state = self.rnn(encoded_state.view(B, T, -1), rnn_state)
+        core_output, new_state = self.rnn(encoded_state.view(B, T, -1), state)
         policy_logits = self.head(core_output)
 
-        return policy_logits, rnn_state
+        return policy_logits, new_state
 
     @torch.no_grad()
-    def act(self, obs, rnn_state):
+    def act(self, obs, state=None, device="cpu"):
         inputs = {
             "tty_chars": torch.tensor(
-                obs["tty_chars"][np.newaxis, np.newaxis, ...], device=DEVICE
+                obs["tty_chars"][np.newaxis, np.newaxis, ...], device=device
             ),
             "tty_colors": torch.tensor(
-                obs["tty_colors"][np.newaxis, np.newaxis, ...], device=DEVICE
+                obs["tty_colors"][np.newaxis, np.newaxis, ...], device=device
             ),
             "screen_image": torch.tensor(
-                obs["screen_image"][np.newaxis, np.newaxis, ...], device=DEVICE
+                obs["screen_image"][np.newaxis, np.newaxis, ...], device=device
             ),
             "prev_actions": torch.tensor(
                 np.array([obs["prev_actions"]]).reshape(1, 1),
                 dtype=torch.long,
-                device=DEVICE,
+                device=device,
             ),
         }
-        logits, new_state = self(inputs, rnn_state)
+        logits, new_state = self(inputs, state)
         # action = torch.multinomial(F.softmax(policy_logits, dim=1), num_samples=1)
-
         return torch.argmax(logits).cpu().item(), new_state
 
 
 @torch.no_grad()
 def evaluate(
-    env_builder, actor: ChaoticDwarvenGPT5, episodes_per_seed: int, device="cpu"
+    env_builder, actor: BC, episodes_per_seed: int, device="cpu"
 ):
     actor.eval()
     eval_stats = defaultdict(dict)
-
+    # TODO: we should not reset hidden state and prev_actions on evaluation, to mimic the training
     for (character, env, seed) in tqdm(env_builder.evaluate()):
         episodes_rewards = []
         for _ in trange(episodes_per_seed, desc="One seed evaluation", leave=False):
             env.seed(seed, reseed=False)
 
             obs, done, episode_reward = env.reset(), False, 0.0
-
-            rnn_state = actor.initial_state(batch_size=1)
+            rnn_state = None
             obs["prev_actions"] = 0
 
             while not done:
-                action, rnn_state = actor.act(obs, rnn_state)
+                action, rnn_state = actor.act(obs, rnn_state, device=device)
                 obs, reward, done, _ = env.step(action)
                 episode_reward += reward
                 obs["prev_actions"] = action
@@ -260,10 +249,13 @@ def train(config: TrainConfig):
         auto_ascend_cls=SAChaoticAutoAscendTTYDataset,
     )
 
-    actor = ChaoticDwarvenGPT5(
-        action_dim=env_builder.get_action_dim(), use_prev_action=config.use_prev_action
+    actor = BC(
+        action_dim=env_builder.get_action_dim(),
+        use_prev_action=config.use_prev_action,
+        rnn_hidden_dim=config.rnn_hidden_dim,
+        rnn_layers=config.rnn_layers,
     ).to(DEVICE)
-    optim = torch.optim.AdamW(actor.parameters(), lr=config.learning_rate)
+    optim = torch.optim.Adam(actor.parameters(), lr=config.learning_rate)
     print("Number of parameters:", sum(p.numel() for p in actor.parameters()))
 
     loader = DataLoader(
@@ -276,7 +268,7 @@ def train(config: TrainConfig):
     scaler = torch.cuda.amp.GradScaler()
 
     prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
-    rnn_state = actor.initial_state(config.batch_size)
+    rnn_state = None
 
     loader_iter = iter(loader)
     for step in trange(config.update_steps, desc="Training"):
@@ -305,7 +297,7 @@ def train(config: TrainConfig):
                             [prev_actions.long(), actions[:, :-1]], dim=1
                         ),
                     },
-                    rnn_state=rnn_state,
+                    state=rnn_state,
                 )
                 rnn_state = [a.detach() for a in rnn_state]
 
