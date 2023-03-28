@@ -9,7 +9,7 @@ eval_every: 10000
 eval_seeds: 50
 group: "ChaoticBC"
 learning_rate: 0.001
-n_workers: 16
+n_workers: 32
 name: "ChaoticBC"
 project: "NeuralNetHack"
 rnn_hidden_dim: 512
