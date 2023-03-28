@@ -17,7 +17,7 @@ PIXEL_SIZE = 6
 CROP_SIZE = 18
 FONT_SIZE = 9
 RESCALE_FONT_SIZE = (6, 6)
-SMALL_FONT_PATH = os.path.abspath("d5rl/utils/render_utils/Hack-Regular.ttf")
+SMALL_FONT_PATH = os.path.abspath("katakomba/utils/render_utils/Hack-Regular.ttf")
 
 # Mapping of 0-15 colors used.
 # Taken from bottom image here. It seems about right

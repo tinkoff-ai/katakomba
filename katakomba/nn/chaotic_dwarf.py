@@ -5,6 +5,7 @@ from torch import nn
 from torch.nn import functional as F
 
 
+# WARN: currently not used
 class MessageEncoder(nn.Module):
     def __init__(self):
         super(MessageEncoder, self).__init__()
@@ -20,6 +21,7 @@ class MessageEncoder(nn.Module):
         return self.msg_fwd(message / 255.0)
 
 
+# WARN: currently not used
 class BLStatsEncoder(nn.Module):
     def __init__(self):
         super(BLStatsEncoder, self).__init__()
