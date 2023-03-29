@@ -173,6 +173,37 @@ class BC(nn.Module):
 
 
 @torch.no_grad()
+def vectorized_evaluate(env_builder, actor: BC, episodes_per_seed: int, device="cpu"):
+    actor.eval()
+    eval_stats = defaultdict(dict)
+
+    for character, vec_env in tqdm(env_builder.vectorized_evaluate(episodes_per_seed)):
+        obs = vec_env.reset()
+        obs["prev_actions"] = np.zeros(vec_env.num_envs, dtype=float)
+
+        rnn_state = None
+        while not vec_env.evaluation_done():
+            action, rnn_state = actor.act(obs, rnn_state, device=device)
+            obs, rewards, dones, infos = vec_env.step(action)
+            obs["prev_actions"] = action
+
+            for info in infos:
+                if "total_return" in info:
+                    seed, idx = info["seed"], info["within_seed_episode_idx"]
+                    eval_stats[character][seed][idx] = info["total_return"]
+
+    for character in eval_stats.keys():
+        # mean over episodes per seed
+        for seed in eval_stats[character].keys():
+            eval_stats[character][seed] = np.mean(list(eval_stats[character][seed].values()))
+        # mean over all seeds
+        eval_stats[character]["mean_return"] = np.mean(list(eval_stats[character].values()))
+
+    actor.train()
+    return eval_stats
+
+
+@torch.no_grad()
 def evaluate(
     env_builder, actor: BC, episodes_per_seed: int, device="cpu"
 ):
