@@ -55,7 +55,7 @@ class _SARSAutoAscendTTYIterator:
             # rewards: [batch_size, seq_len]
             # dones: [batch_size, seq_len]
             # next_states: [batch_size, seq_len, 24, 80, 3]
-            yield states, actions, rewards, dones, next_states
+            yield states, actions, rewards, next_states, dones
 
     def _convert_batch(self, batch):
         # [batch_size, seq_len, 24, 80, 3]
