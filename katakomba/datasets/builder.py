@@ -134,12 +134,14 @@ class AutoAscendDatasetBuilder:
             )
             subselect_sql_args += tuple(self._races)
         if self._alignments:
-            subselect_sql += "align in ({seq}) AND ".format(
+            # align can change during the game, so need to use 0
+            subselect_sql += "align0 in ({seq}) AND ".format(
                 seq=",".join(["?"] * len(self._alignments))
             )
             subselect_sql_args += tuple(self._alignments)
         if self._sex:
-            subselect_sql += "gender in ({seq}) AND ".format(
+            # gender can change during the game, so need to use 0
+            subselect_sql += "gender0 in ({seq}) AND ".format(
                 seq=",".join(["?"] * len(self._sex))
             )
             subselect_sql_args += tuple(self._sex)

@@ -4,9 +4,11 @@ import gym
 from nle.env.base import NLE
 
 
-class NetHackWrapper(gym.Wrapper):
+class OfflineNetHackWrapper(gym.Wrapper):
     """
-    NetHack needs a modified gym-wrapper due to its multiple-seeding strategy.
+    - NetHack needs a modified gym-wrapper due to its multiple-seeding strategy.
+      This is needed for reproducible results. Reseeding is not an issue yet for SOTA ORL algorithms.
+    - Normalized scores and levels
     """
 
     def __init__(self, env: NLE):
@@ -43,3 +45,13 @@ class NetHackWrapper(gym.Wrapper):
             [tuple] The seeds supplied, in the form (core, disp, reseed).
         """
         return self.env.seed(core, disp, reseed)
+
+    def get_normalized_score(
+        self, score: int, against: str = "autoascend-bot"
+    ) -> float:
+        raise NotImplementedError()
+
+    def get_normalized_level(
+        self, level: int, against: str = "autoascend-bot"
+    ) -> float:
+        raise NotImplementedError()

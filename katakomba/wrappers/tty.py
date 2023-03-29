@@ -3,10 +3,10 @@ import numpy as np
 from nle import nethack
 from nle.env import base
 
-from katakomba.wrappers.base import NetHackWrapper
+from katakomba.wrappers.base import OfflineNetHackWrapper
 
 
-class TTYWrapper(NetHackWrapper):
+class TTYWrapper(OfflineNetHackWrapper):
     """
     An observation wrapper that converts tty_* to a numpy array.
     """

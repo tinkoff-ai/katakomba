@@ -7,11 +7,11 @@ from typing import List, Optional
 from nle.env.base import NLE
 
 from katakomba.utils.roles import ALLOWED_COMBOS, Alignment, Race, Role, Sex
-from katakomba.wrappers import NetHackWrapper
+from katakomba.wrappers import OfflineNetHackWrapper
 
 
 class NetHackEnvBuilder:
-    def __init__(self, nethack_env_fn: NLE, wrapper: Optional[NetHackWrapper]):
+    def __init__(self, nethack_env_fn: NLE, wrapper: Optional[OfflineNetHackWrapper]):
         """
         To keep in mind:
           - Not all combinations of character options are allowed by NetHack, we will filter it for you.

@@ -2,10 +2,10 @@ import gym
 import numpy as np
 
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
-from katakomba.wrappers.base import NetHackWrapper
+from katakomba.wrappers.base import OfflineNetHackWrapper
 
 
-class CropRenderWrapper(NetHackWrapper):
+class CropRenderWrapper(OfflineNetHackWrapper):
     """
     Populates observation with:
         - screen_image: [3, crop_width, crop_height]. For specific values see d5rl/utils/render.py
