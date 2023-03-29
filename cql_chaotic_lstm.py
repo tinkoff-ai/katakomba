@@ -23,6 +23,8 @@ from katakomba.utils.roles import Alignment, Race, Role, Sex
 from katakomba.datasets import SARSChaoticAutoAscendTTYDataset
 from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
 from katakomba.utils.render import SCREEN_SHAPE
+from katakomba.utils.stats import StatMean
+
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -39,6 +41,7 @@ class TrainConfig:
     version: str = "v0"
     # Model
     use_prev_action: bool = True
+    clip_range: float = 10.0
     rnn_layers: int = 1
     rnn_hidden_dim: int = 512
     tau: float = 0.05
@@ -292,6 +295,10 @@ def train(config: TrainConfig):
     )
     scaler = torch.cuda.amp.GradScaler()
 
+    # For reward normalization
+    reward_stats = StatMean(cumulative=True)
+    running_rewards = 0.0
+
     prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
     rnn_state, target_rnn_state = None, None
 
@@ -307,6 +314,19 @@ def train(config: TrainConfig):
             dones,
         ) = [t.to(DEVICE) for t in next(loader_iter)]
         actions = actions.long()
+
+        # Update reward statistics
+        running_rewards *= config.gamma
+        running_rewards += rewards
+        reward_stats += running_rewards**2
+        running_rewards *= (~dones).float()
+
+        # Normalize the reward
+        reward_std = reward_stats.mean() ** 0.5
+        rewards /= max(0.01, reward_std)
+
+        # Clip the reward
+        rewards = torch.clip(rewards, -config.clip_range, config.clip_range)
 
         obs = {
             "screen_image": screen_image,

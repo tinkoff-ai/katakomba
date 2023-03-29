@@ -78,7 +78,7 @@ class _SARSChaoticAutoAscendTTYIterator:
 
         actions = np.take_along_axis(self.action_mapping, batch["keypresses"], axis=0)
         # TODO: score difference as reward
-        rewards = deepcopy(batch["scores"])
+        rewards = deepcopy(batch["scores"]).astype(np.float32)
         dones = deepcopy(batch["done"])
         return screen_image, tty_chars, actions, rewards, dones
 

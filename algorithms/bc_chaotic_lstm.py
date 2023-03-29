@@ -92,7 +92,13 @@ def set_seed(seed: int):
 
 
 class BC(nn.Module):
-    def __init__(self, action_dim: int, rnn_hidden_dim: int = 512, rnn_layers: int = 1, use_prev_action: bool = True):
+    def __init__(
+        self,
+        action_dim: int,
+        rnn_hidden_dim: int = 512,
+        rnn_layers: int = 1,
+        use_prev_action: bool = True,
+    ):
         super().__init__()
         # Action dimensions and prev actions
         self.num_actions = action_dim
@@ -115,7 +121,9 @@ class BC(nn.Module):
             ]
         )
         # Policy
-        self.rnn = nn.LSTM(self.h_dim, rnn_hidden_dim, num_layers=rnn_layers, batch_first=True)
+        self.rnn = nn.LSTM(
+            self.h_dim, rnn_hidden_dim, num_layers=rnn_layers, batch_first=True
+        )
         self.head = nn.Linear(rnn_hidden_dim, self.num_actions)
 
     def forward(self, inputs, state=None):
@@ -173,9 +181,7 @@ class BC(nn.Module):
 
 
 @torch.no_grad()
-def evaluate(
-    env_builder, actor: BC, episodes_per_seed: int, device="cpu"
-):
+def evaluate(env_builder, actor: BC, episodes_per_seed: int, device="cpu"):
     actor.eval()
     eval_stats = defaultdict(dict)
     # TODO: we should not reset hidden state and prev_actions on evaluation, to mimic the training
