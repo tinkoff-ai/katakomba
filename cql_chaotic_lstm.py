@@ -38,7 +38,7 @@ class TrainConfig:
     project: str = "NeuralNetHack"
     group: str = "CQL"
     name: str = "CQL"
-    version: str = "v0"
+    version: str = "v1"
     # Model
     use_prev_action: bool = True
     clip_range: float = 10.0
