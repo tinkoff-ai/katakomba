@@ -18,7 +18,6 @@ from torch.utils.data import DataLoader
 
 from tqdm.auto import tqdm, trange
 from collections import defaultdict
-from torch.distributions import Categorical
 import numpy as np
 
 from typing import Optional, Tuple
@@ -31,6 +30,10 @@ from katakomba.utils.render import SCREEN_SHAPE
 torch.backends.cudnn.benchmark = True
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def recursive_defaultdict():
+    return defaultdict(recursive_defaultdict)
 
 
 class timeit:
@@ -144,38 +147,39 @@ class BC(nn.Module):
             )
 
         encoded_state = torch.cat(encoded_state, dim=1)
-        core_output, new_state = self.rnn(encoded_state.view(B, T, -1), state)
-        policy_logits = self.head(core_output)
+        out, new_state = self.rnn(encoded_state.view(B, T, -1), state)
+        logits = self.head(out)
 
-        return policy_logits, new_state
+        return logits, new_state
 
     @torch.no_grad()
     def act(self, obs, state=None, device="cpu"):
         inputs = {
-            "tty_chars": torch.tensor(
-                obs["tty_chars"][np.newaxis, np.newaxis, ...], device=device
-            ),
-            "tty_colors": torch.tensor(
-                obs["tty_colors"][np.newaxis, np.newaxis, ...], device=device
-            ),
-            "screen_image": torch.tensor(
-                obs["screen_image"][np.newaxis, np.newaxis, ...], device=device
-            ),
-            "prev_actions": torch.tensor(
-                np.array([obs["prev_actions"]]).reshape(1, 1),
-                dtype=torch.long,
-                device=device,
-            ),
+            "tty_chars": torch.tensor(obs["tty_chars"][np.newaxis, np.newaxis, ...], device=device),
+            "tty_colors": torch.tensor(obs["tty_colors"][np.newaxis, np.newaxis, ...], device=device),
+            "screen_image": torch.tensor(obs["screen_image"][np.newaxis, np.newaxis, ...], device=device),
+            "prev_actions": torch.tensor(np.array([obs["prev_actions"]]).reshape(1, 1), dtype=torch.long, device=device),
         }
         logits, new_state = self(inputs, state)
-        # action = torch.multinomial(F.softmax(policy_logits, dim=1), num_samples=1)
         return torch.argmax(logits).cpu().item(), new_state
+
+    @torch.no_grad()
+    def vec_act(self, obs, state=None, device="cpu"):
+        inputs = {
+            "tty_chars": torch.tensor(obs["tty_chars"][:, np.newaxis], device=device),
+            "tty_colors": torch.tensor(obs["tty_colors"][:, np.newaxis], device=device),
+            "screen_image": torch.tensor(obs["screen_image"][:, np.newaxis], device=device),
+            "prev_actions": torch.tensor(obs["prev_actions"][:, np.newaxis], dtype=torch.long, device=device),
+        }
+        logits, new_state = self(inputs, state)
+        actions = torch.argmax(logits.squeeze(1), dim=-1)
+        return actions.cpu().numpy(), new_state
 
 
 @torch.no_grad()
 def vectorized_evaluate(env_builder, actor: BC, episodes_per_seed: int, device="cpu"):
     actor.eval()
-    eval_stats = defaultdict(dict)
+    eval_stats = recursive_defaultdict()
 
     for character, vec_env in tqdm(env_builder.vectorized_evaluate(episodes_per_seed)):
         obs = vec_env.reset()
@@ -183,7 +187,7 @@ def vectorized_evaluate(env_builder, actor: BC, episodes_per_seed: int, device="
 
         rnn_state = None
         while not vec_env.evaluation_done():
-            action, rnn_state = actor.act(obs, rnn_state, device=device)
+            action, rnn_state = actor.vec_act(obs, rnn_state, device=device)
             obs, rewards, dones, infos = vec_env.step(action)
             obs["prev_actions"] = action
 
@@ -288,96 +292,103 @@ def train(config: TrainConfig):
     optim = torch.optim.Adam(actor.parameters(), lr=config.learning_rate)
     print("Number of parameters:", sum(p.numel() for p in actor.parameters()))
 
-    loader = DataLoader(
-        dataset=dataset,
-        # Disable automatic batching
-        batch_sampler=None,
-        batch_size=None,
-        pin_memory=True,
+    # eval_stats = evaluate(
+    #     env_builder, actor, config.eval_episodes_per_seed, device=DEVICE
+    # )
+    eval_stats = vectorized_evaluate(
+        env_builder, actor, config.eval_episodes_per_seed, device=DEVICE
     )
-    scaler = torch.cuda.amp.GradScaler()
 
-    prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
-    rnn_state = None
-
-    loader_iter = iter(loader)
-    for step in trange(config.update_steps, desc="Training"):
-        with timeit() as timer:
-            tty_chars, tty_colors, tty_cursor, screen_image, actions = (
-                a.to(DEVICE) for a in next(loader_iter)
-            )
-            actions = actions.long()
-
-        wandb.log(
-            {
-                "times/batch_loading_cpu": timer.elapsed_time_cpu,
-                "times/batch_loading_gpu": timer.elapsed_time_gpu,
-            },
-            step=step,
-        )
-
-        with timeit() as timer:
-            with torch.cuda.amp.autocast():
-                logits, rnn_state = actor(
-                    inputs={
-                        "tty_chars": tty_chars,
-                        "tty_colors": tty_colors,
-                        "screen_image": screen_image,
-                        "prev_actions": torch.cat(
-                            [prev_actions.long(), actions[:, :-1]], dim=1
-                        ),
-                    },
-                    state=rnn_state,
-                )
-                rnn_state = [a.detach() for a in rnn_state]
-
-                dist = Categorical(logits=logits)
-                loss = -dist.log_prob(actions).mean()
-                # update prev_actions for next iteration
-                prev_actions = actions[:, -1].unsqueeze(-1)
-
-        wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
-
-        with timeit() as timer:
-            scaler.scale(loss).backward()
-
-            if config.clip_grad_norm is not None:
-                scaler.unscale_(optim)
-                torch.nn.utils.clip_grad_norm_(
-                    actor.parameters(), config.clip_grad_norm
-                )
-
-            scaler.step(optim)
-            scaler.update()
-            optim.zero_grad(set_to_none=True)
-
-        wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
-
-        wandb.log(
-            {
-                "loss": loss.detach().item(),
-                "transitions": config.batch_size * config.seq_len * step,
-            },
-            step=step,
-        )
-
-        if (step + 1) % config.eval_every == 0:
-            eval_stats = evaluate(
-                env_builder, actor, config.eval_episodes_per_seed, device=DEVICE
-            )
-            wandb.log(
-                dict(
-                    eval_stats,
-                    **{"transitions": config.batch_size * config.seq_len * step},
-                ),
-                step=step,
-            )
-
-            if config.checkpoints_path is not None:
-                torch.save(
-                    actor.state_dict(),
-                    os.path.join(config.checkpoints_path, f"{step}.pt"),
-                )
+    # loader = DataLoader(
+    #     dataset=dataset,
+    #     # Disable automatic batching
+    #     batch_sampler=None,
+    #     batch_size=None,
+    #     pin_memory=True,
+    # )
+    # scaler = torch.cuda.amp.GradScaler()
+    #
+    # prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
+    # rnn_state = None
+    #
+    # loader_iter = iter(loader)
+    # for step in trange(config.update_steps, desc="Training"):
+    #     with timeit() as timer:
+    #         tty_chars, tty_colors, tty_cursor, screen_image, actions = (
+    #             a.to(DEVICE) for a in next(loader_iter)
+    #         )
+    #         actions = actions.long()
+    #
+    #     wandb.log(
+    #         {
+    #             "times/batch_loading_cpu": timer.elapsed_time_cpu,
+    #             "times/batch_loading_gpu": timer.elapsed_time_gpu,
+    #         },
+    #         step=step,
+    #     )
+    #
+    #     with timeit() as timer:
+    #         with torch.cuda.amp.autocast():
+    #             logits, rnn_state = actor(
+    #                 inputs={
+    #                     "tty_chars": tty_chars,
+    #                     "tty_colors": tty_colors,
+    #                     "screen_image": screen_image,
+    #                     "prev_actions": torch.cat(
+    #                         [prev_actions.long(), actions[:, :-1]], dim=1
+    #                     ),
+    #                 },
+    #                 state=rnn_state,
+    #             )
+    #             rnn_state = [a.detach() for a in rnn_state]
+    #
+    #             dist = Categorical(logits=logits)
+    #             loss = -dist.log_prob(actions).mean()
+    #             # update prev_actions for next iteration
+    #             prev_actions = actions[:, -1].unsqueeze(-1)
+    #
+    #     wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
+    #
+    #     with timeit() as timer:
+    #         scaler.scale(loss).backward()
+    #
+    #         if config.clip_grad_norm is not None:
+    #             scaler.unscale_(optim)
+    #             torch.nn.utils.clip_grad_norm_(
+    #                 actor.parameters(), config.clip_grad_norm
+    #             )
+    #
+    #         scaler.step(optim)
+    #         scaler.update()
+    #         optim.zero_grad(set_to_none=True)
+    #
+    #     wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
+    #
+    #     wandb.log(
+    #         {
+    #             "loss": loss.detach().item(),
+    #             "transitions": config.batch_size * config.seq_len * step,
+    #         },
+    #         step=step,
+    #     )
+    #
+    #     if (step + 1) % config.eval_every == 0:
+    #         eval_stats = evaluate(
+    #             env_builder, actor, config.eval_episodes_per_seed, device=DEVICE
+    #         )
+    #         wandb.log(
+    #             dict(
+    #                 eval_stats,
+    #                 **{"transitions": config.batch_size * config.seq_len * step},
+    #             ),
+    #             step=step,
+    #         )
+    #
+    #         if config.checkpoints_path is not None:
+    #             torch.save(
+    #                 actor.state_dict(),
+    #                 os.path.join(config.checkpoints_path, f"{step}.pt"),
+    #             )
 
 
 if __name__ == "__main__":

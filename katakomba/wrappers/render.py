@@ -23,9 +23,7 @@ class CropRenderWrapper(NetHackWrapper):
         }
         obs_spaces.update(
             [
-                (k, self.env.observation_space[k])
-                for k in self.env.observation_space
-                if k not in ["tty_chars", "tty_colors"]
+                (k, self.env.observation_space[k]) for k in self.env.observation_space
             ]
         )
         self.observation_space = gym.spaces.Dict(obs_spaces)

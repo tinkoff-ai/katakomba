@@ -44,8 +44,9 @@ class NetHackEvalVectorEnv:
             obs.append(env_obs)
 
         self.__fake_obs = obs[0]
+        self._obs = concatenate(obs, self._obs, self.single_observation_space)
 
-        return np.array(obs)
+        return self._obs
 
     def step(self, actions):
         if self.evaluation_done():
@@ -57,6 +58,8 @@ class NetHackEvalVectorEnv:
                 # TODO: for now, after the limit of episodes for this seed,
                 #  we will add fake obs, this is not compute optimal!
                 obs.append(self.__fake_obs)
+                self._rewards[i] = 0.0
+                self._dones[i] = True
                 infos.append({})
                 continue
 
