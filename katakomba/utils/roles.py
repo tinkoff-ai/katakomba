@@ -4,6 +4,8 @@ Source: https://nethackwiki.com/wiki/Role#Role_table_by_alignment_and_race
 """
 import enum
 
+from typing import Tuple
+
 
 class Role(enum.Enum):
     ARCHEOLOGIST = "arc"
@@ -41,7 +43,7 @@ class Sex(enum.Enum):
 
 
 ### These combinations are allowed by NetHack
-### On sex: both are always available except Valkyrie (which has no sex)
+### On sex: both are always available except Valkyrie (which is always female)
 ALLOWED_COMBOS = set(
     [
         (Role.ARCHEOLOGIST, Race.HUMAN, Alignment.LAWFUL),
@@ -84,3 +86,16 @@ ALLOWED_COMBOS = set(
         (Role.WIZARD, Race.ORC, Alignment.CHAOTIC),
     ]
 )
+
+
+def decode_character_str(character: str) -> Tuple[Role, Race, Alignment, Sex]:
+    if character.count("-") != 3:
+        raise Exception("Cannot decode the character without full specification.")
+
+    settings = character.split("-")
+    role = Role._value2member_map_[str.lower(settings[0])]
+    race = Race._value2member_map_[str.lower(settings[1])]
+    alignment = Alignment._value2member_map_[str.lower(settings[2])]
+    sex = Sex._value2member_map_[str.lower(settings[3])]
+
+    return role, race, alignment, sex

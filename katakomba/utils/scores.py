@@ -1,15 +1,7 @@
 """
 Here are the statistics for results and the normalization all around.
 """
-
-import enum
-
 from katakomba.utils.roles import Role, Race, Alignment, Sex
-
-
-class ReferenceAgent(enum.Enum):
-    AutoAscendBot = "autoascend-bot"
-    Human = "human"
 
 
 MEAN_SCORES_AUTOASCEND = {
@@ -93,15 +85,3 @@ def normalize_score_against_bot(
     score: int, role: Role, race: Race, alignment: Alignment, sex: Sex
 ) -> float:
     return score / MEAN_SCORES_AUTOASCEND[(role, race, alignment, sex)]
-
-
-def normalize_level_against_bot(level: int) -> float:
-    raise NotImplementedError()
-
-
-def normalize_score_against_human(score: int) -> float:
-    raise NotImplementedError()
-
-
-def normalize_level_against_human(level: int) -> float:
-    raise NotImplementedError()

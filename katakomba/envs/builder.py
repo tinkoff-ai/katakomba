@@ -103,7 +103,7 @@ class NetHackEnvBuilder:
         else:
             env_fn = self._env_fn
 
-        # Environment with a random character (action space does not depent on the character)
-        dummy_env = env_fn("@")
+        # Environment with the monk-human-neutral-female character (action space does not depent on the character)
+        dummy_env = env_fn("mon-hum-neu-fem")
 
         return dummy_env.action_space.n

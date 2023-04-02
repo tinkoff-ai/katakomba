@@ -69,9 +69,9 @@ class TrainConfig:
     learning_rate: float = 0.0001
     clip_grad_norm: Optional[float] = 4.0
     checkpoints_path: Optional[str] = None
-    eval_every: int = 10_000
+    eval_every: int = 1  # 10_000
     eval_episodes_per_seed: int = 1
-    eval_seeds: int = 50
+    eval_seeds: int = 5  # 50
     train_seed: int = 42
     use_prev_action: bool = True
 
@@ -92,7 +92,13 @@ def set_seed(seed: int):
 
 
 class BC(nn.Module):
-    def __init__(self, action_dim: int, rnn_hidden_dim: int = 512, rnn_layers: int = 1, use_prev_action: bool = True):
+    def __init__(
+        self,
+        action_dim: int,
+        rnn_hidden_dim: int = 512,
+        rnn_layers: int = 1,
+        use_prev_action: bool = True,
+    ):
         super().__init__()
         # Action dimensions and prev actions
         self.num_actions = action_dim
@@ -115,7 +121,9 @@ class BC(nn.Module):
             ]
         )
         # Policy
-        self.rnn = nn.LSTM(self.h_dim, rnn_hidden_dim, num_layers=rnn_layers, batch_first=True)
+        self.rnn = nn.LSTM(
+            self.h_dim, rnn_hidden_dim, num_layers=rnn_layers, batch_first=True
+        )
         self.head = nn.Linear(rnn_hidden_dim, self.num_actions)
 
     def forward(self, inputs, state=None):
@@ -173,18 +181,19 @@ class BC(nn.Module):
 
 
 @torch.no_grad()
-def evaluate(
-    env_builder, actor: BC, episodes_per_seed: int, device="cpu"
-):
+def evaluate(env_builder, actor: BC, episodes_per_seed: int, device="cpu"):
     actor.eval()
-    eval_stats = defaultdict(dict)
+    eval_stats = defaultdict(lambda: defaultdict(dict))
     # TODO: we should not reset hidden state and prev_actions on evaluation, to mimic the training
     for (character, env, seed) in tqdm(env_builder.evaluate()):
         episodes_rewards = []
+        episodes_scores = []
+        episodes_depth = []
         for _ in trange(episodes_per_seed, desc="One seed evaluation", leave=False):
             env.seed(seed, reseed=False)
 
             obs, done, episode_reward = env.reset(), False, 0.0
+            episode_max_depth = 0
             rnn_state = None
             obs["prev_actions"] = 0
 
@@ -192,16 +201,27 @@ def evaluate(
                 action, rnn_state = actor.act(obs, rnn_state, device=device)
                 obs, reward, done, _ = env.step(action)
                 episode_reward += reward
+                episode_max_depth = max(episode_max_depth, env.get_current_depth())
                 obs["prev_actions"] = action
 
             episodes_rewards.append(episode_reward)
+            episodes_scores.append(env.get_normalized_score(episode_reward))
+            episodes_depth.append(episode_max_depth)
 
-        eval_stats[character][seed] = np.mean(episodes_rewards)
+        eval_stats["total_return"][character][seed] = np.mean(episodes_rewards)
+        eval_stats["total_score"][character][seed] = np.mean(episodes_scores)
+        eval_stats["total_depth"][character][seed] = np.median(episodes_depth)
 
     # for each character also log mean across all seeds
-    for character in eval_stats.keys():
-        eval_stats[character]["mean_return"] = np.mean(
-            list(eval_stats[character].values())
+    for character in eval_stats["total_return"].keys():
+        eval_stats["total_return"][character]["mean"] = np.mean(
+            list(eval_stats["total_return"][character].values())
+        )
+        eval_stats["total_score"][character]["mean"] = (
+            np.mean(list(eval_stats["total_score"][character].values())) * 100
+        )
+        eval_stats["total_depth"][character]["median"] = np.median(
+            list(eval_stats["total_depth"][character].values())
         )
 
     actor.train()
