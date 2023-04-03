@@ -4,10 +4,10 @@ from copy import deepcopy
 from itertools import product
 from typing import List, Optional
 
+from gym.vector import AsyncVectorEnv
 from nle.env.base import NLE
 
 from katakomba.utils.roles import ALLOWED_COMBOS, Alignment, Race, Role, Sex
-from katakomba.utils.vector_eval import NetHackEvalVectorEnv
 from katakomba.wrappers import NetHackWrapper
 
 
@@ -79,27 +79,25 @@ class NetHackEnvBuilder:
 
         return eval_characters
 
-    def vectorized_evaluate(self, num_episodes_per_seed: int = 1):
+    def vectorized_evaluate(self, num_processes=8):
         """
-        An iterator over the NLE characters to evaluate against, vectorized over evaluation seeds.
+        An iterator over the NLE characters to evaluate against.
         """
-        if self._eval_seeds is None:
-            raise RuntimeError("We provide vectorized evaluation only when evaluation seeds are provided.")
-
         eval_characters = self.__valid_eval_characters()
+        # Environment and its wrapper are dataset-dependent (wrappers are needed for producing images of tty)
         if self._env_wrapper:
-            env_fn = lambda char: self._env_wrapper(
-                self._env_fn(character=char, savedir=False)
+            env_fn = lambda character: self._env_wrapper(
+                self._env_fn(character=character, savedir=False)
             )
         else:
-            env_fn = lambda char: self._env_fn(character=char, savedir=False)
+            env_fn = lambda character: self._env_fn(character=character, savedir=False)
 
         # Generate nethack challenges
         for character in sorted(eval_characters):
-            vec_env = NetHackEvalVectorEnv(
-                env_fn=lambda: env_fn(character),
-                seeds=self._eval_seeds,
-                num_episodes_per_seed=num_episodes_per_seed
+            vec_env = AsyncVectorEnv(
+                env_fns=[lambda: env_fn(character) for _ in range(num_processes)],
+                shared_memory=True,
+                copy=False
             )
             yield character, vec_env
 
@@ -110,11 +108,11 @@ class NetHackEnvBuilder:
         eval_characters = self.__valid_eval_characters()
         # Environment and its wrapper are dataset-dependent (wrappers are needed for producing images of tty)
         if self._env_wrapper:
-            env_fn = lambda char: self._env_wrapper(
-                self._env_fn(character=char, savedir=False)
+            env_fn = lambda character: self._env_wrapper(
+                self._env_fn(character=character, savedir=False)
             )
         else:
-            env_fn = lambda char: self._env_fn(character=char, savedir=False)
+            env_fn = lambda character: self._env_fn(character=character, savedir=False)
 
         # Generate nethack challenges
         for character in sorted(eval_characters):
