@@ -155,17 +155,7 @@ class BC(nn.Module):
 
     @torch.no_grad()
     def act(self, obs, state=None, device="cpu"):
-        inputs = {
-            "tty_chars": torch.tensor(obs["tty_chars"][np.newaxis, np.newaxis, ...], device=device),
-            "tty_colors": torch.tensor(obs["tty_colors"][np.newaxis, np.newaxis, ...], device=device),
-            "screen_image": torch.tensor(obs["screen_image"][np.newaxis, np.newaxis, ...], device=device),
-            "prev_actions": torch.tensor(np.array([obs["prev_actions"]]).reshape(1, 1), dtype=torch.long, device=device),
-        }
-        logits, new_state = self(inputs, state)
-        return torch.argmax(logits).cpu().item(), new_state
-
-    @torch.no_grad()
-    def vec_act(self, obs, state=None, device="cpu"):
+        assert obs["tty_chars"].ndim == 3, "obs should be batched and without seq_len dim"
         inputs = {
             "tty_chars": torch.tensor(obs["tty_chars"][:, np.newaxis], device=device),
             "tty_colors": torch.tensor(obs["tty_colors"][:, np.newaxis], device=device),
