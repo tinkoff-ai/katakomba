@@ -64,6 +64,7 @@ class TrainConfig:
     # Model
     rnn_hidden_dim: int = 512
     rnn_layers: int = 1
+    use_prev_action: bool = True
     # Training
     update_steps: int = 180_000
     batch_size: int = 256
@@ -73,10 +74,10 @@ class TrainConfig:
     clip_grad_norm: Optional[float] = 4.0
     checkpoints_path: Optional[str] = None
     eval_every: int = 10_000
-    eval_episodes: int = 10
+    eval_episodes: int = 50
+    eval_processes: int = 8
     eval_seed: int = 50
     train_seed: int = 42
-    use_prev_action: bool = True
 
     def __post_init__(self):
         self.group = f"{self.group}-{self.env}-{self.version}"
@@ -364,7 +365,7 @@ def train(config: TrainConfig):
 
         if (step + 1) % config.eval_every == 0:
             eval_stats = evaluate_all_characters(
-                env_builder, actor, config.eval_episodes, device=DEVICE, seed=config.eval_seed
+                env_builder, actor, config.eval_episodes, config.eval_processes, device=DEVICE, seed=config.eval_seed
             )
             wandb.log(
                 dict(
