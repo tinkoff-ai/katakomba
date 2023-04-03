@@ -86,11 +86,11 @@ class NetHackEnvBuilder:
         eval_characters = self.__valid_eval_characters()
         # Environment and its wrapper are dataset-dependent (wrappers are needed for producing images of tty)
         if self._env_wrapper:
-            env_fn = lambda character: self._env_wrapper(
-                self._env_fn(character=character, savedir=False)
+            env_fn = lambda char: self._env_wrapper(
+                self._env_fn(character=char, savedir=False)
             )
         else:
-            env_fn = lambda character: self._env_fn(character=character, savedir=False)
+            env_fn = lambda char: self._env_fn(character=char, savedir=False)
 
         # Generate nethack challenges
         for character in sorted(eval_characters):
@@ -108,11 +108,11 @@ class NetHackEnvBuilder:
         eval_characters = self.__valid_eval_characters()
         # Environment and its wrapper are dataset-dependent (wrappers are needed for producing images of tty)
         if self._env_wrapper:
-            env_fn = lambda character: self._env_wrapper(
-                self._env_fn(character=character, savedir=False)
+            env_fn = lambda char: self._env_wrapper(
+                self._env_fn(character=char, savedir=False)
             )
         else:
-            env_fn = lambda character: self._env_fn(character=character, savedir=False)
+            env_fn = lambda char: self._env_fn(character=char, savedir=False)
 
         # Generate nethack challenges
         for character in sorted(eval_characters):
