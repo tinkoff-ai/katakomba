@@ -171,7 +171,8 @@ class BC(nn.Module):
 def evaluate_character(vec_env, actor, num_episodes, device="cpu", seed=None):
     # set seed for reproducibility (reseed=False by default)
     vec_env.seed(seed)
-    # all is work is needed to mitigate bias for shorter episodes during vectorized evaluation, for more see:
+    # all this work is needed to mitigate bias for shorter
+    # episodes during vectorized evaluation, for more see:
     # https://github.com/DLR-RM/stable-baselines3/issues/402
     n_envs = vec_env.num_envs
     episode_rewards = []
