@@ -21,7 +21,7 @@ from utils import combine_datasets
 
 @dataclass
 class ModelConfig:
-    embedding_dim: int = 64             # use at least 32, 64 is stronger
+    embedding_dim: int = 64              # use at least 32, 64 is stronger
     hidden_dim: int = 256                # use at least 128, 256 is stronger
     crop_model: str = "cnn"
     crop_dim: int = 9                    # size of crop
