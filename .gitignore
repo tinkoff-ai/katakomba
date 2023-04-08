@@ -19,6 +19,7 @@ __pycache__/
 *$py.class
 
 # Misc
+test_vec_env.py
 test.py
 test.ipynb
 .ml-job-preset.yml
