@@ -21,8 +21,8 @@ datasets==2.8.0
 accelerate==0.15.0
 
 # minihack datasets
+gumnasium==0.28.1
 ray[default,rllib]==2.3.1
 tensorflow_probability==0.19.0
 minihack==0.1.5
 h5py==3.7.0
-git+https://github.com/Farama-Foundation/Minari@45a1b6d9327f899e097c944b9086e847112d54c8#egg=Minari

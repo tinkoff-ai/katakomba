@@ -1,1 +1,1 @@
-# MiniHack Datasets for Offline RL 
+# MiniHack Datasets for Offline RL

@@ -1,8 +1,6 @@
 import os
 import ray
-import minari
 import pyrallis
-import gymnasium as new_gym
 
 from glob import glob
 from pyrallis import field
@@ -21,18 +19,18 @@ from utils import combine_datasets
 
 @dataclass
 class ModelConfig:
-    embedding_dim: int = 64              # use at least 32, 64 is stronger
-    hidden_dim: int = 256                # use at least 128, 256 is stronger
+    embedding_dim: int = 64  # use at least 32, 64 is stronger
+    hidden_dim: int = 256  # use at least 128, 256 is stronger
     crop_model: str = "cnn"
-    crop_dim: int = 9                    # size of crop
-    glyph_type: str = "all_cat"          # full, group_id, color_char, all, all_cat* (all_cat best, full fastest)
-    use_index_select: bool = True        # use index select instead of normal embedding lookup
-    layers: int = 5                      # number of cnn layers for crop/glyph model
-    msg_model: Optional[str] = None      # character model: none, lt_cnn*, cnn, gru, lstm
-    msg_hidden_dim: int = 64             # recommend 256
-    msg_embedding_dim: int = 32          # recommend 64
-    equalize_input_dim: bool = False     # project inputs to same dim (*false unless doing dynamics)
-    equalize_factor: int = 2             # multiplies hdim by this when equalize is enabled (2 > 1)
+    crop_dim: int = 9  # size of crop
+    glyph_type: str = "all_cat"  # full, group_id, color_char, all, all_cat* (all_cat best, full fastest)
+    use_index_select: bool = True  # use index select instead of normal embedding lookup
+    layers: int = 5  # number of cnn layers for crop/glyph model
+    msg_model: Optional[str] = None  # character model: none, lt_cnn*, cnn, gru, lstm
+    msg_hidden_dim: int = 64  # recommend 256
+    msg_embedding_dim: int = 32  # recommend 64
+    equalize_input_dim: bool = False  # project inputs to same dim (*false unless doing dynamics)
+    equalize_factor: int = 2  # multiplies hdim by this when equalize is enabled (2 > 1)
 
 
 @dataclass
@@ -43,16 +41,16 @@ class TrainConfig:
     # data set config
     version: int = 0
     data_path: str = "minihack_data"
-    env_name: str = "MiniHack-Room-Random-15x15-v0"
+    env_name: str = "MiniHack-Room-Trap-15x15-v0"
     # ray config
-    num_gpus: int = 1      # 1
-    num_cpus: int = 32     # 32
-    num_actors: int = 128  # 256
+    num_gpus: int = 1
+    num_cpus: int = 32
+    num_actors: int = 256
     # algo config
     gamma: float = 0.999
     learning_rate: float = 2e-4
     grad_clip: float = 40.0
-    total_steps: int = 2_000_000  # 10_000_000
+    total_steps: int = 2_000_000
     lstm_seq_len: int = 80
     # ppo config
     model_config: ModelConfig = field(default_factory=ModelConfig)
@@ -71,32 +69,19 @@ class TrainConfig:
     def __post_init__(self):
         self.group = f"Datasets-v{self.version}"
         self.data_path = os.path.join(self.data_path, f"{self.env_name}", f"v{self.version}")
-        
+
 
 @pyrallis.wrap()
 def train(config: TrainConfig):
     os.makedirs(config.data_path, exist_ok=True)
     os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "1"  # only log to wandb
-    os.environ["MINARI_DATASETS_PATH"] = config.data_path   # Minari will save dataset here
-
-    def env_creator(env_config):
-        # we need to register our env in the gymnasium in closure as RLLlibMinihackEnv require
-        # a registered MiniHackGymnasiumAdapter env, however default gym registry is not compatible with ray
-        # see: https://docs.ray.io/en/latest/rllib/rllib-env.html
-        new_gym.register(
-            id=config.env_name, 
-            entry_point="minihack_datasets.env:MiniHackGymnasiumAdapter",
-            kwargs={"minihack_env_name": config.env_name}    
-        )
-        return RLLlibMinihackEnv(env_config)
 
     ray.init(num_gpus=config.num_gpus, num_cpus=config.num_cpus + 1)
-    tune.registry.register_env("MiniHackEnv-v0", lambda config: env_creator(config))
     ModelCatalog.register_custom_model("rllib_minihack_model", RLLibMiniHackModel)
 
     algo_config = (
         PPOConfig()
-        .environment("MiniHackEnv-v0", env_config={"config": config})
+        .environment(RLLlibMinihackEnv, env_config={"config": config})
         .framework("torch")
         .training(
             model={
@@ -155,14 +140,14 @@ def train(config: TrainConfig):
     tuner.fit()
 
     # combining datasets from all workers then delete them
-    datasets_paths = glob(f"{config.data_path}/{config.env_name}-*-v{config.version}")
-    datasets_names = [path.split("/")[-1] for path in datasets_paths]
-
-    datasets = [minari.load_dataset(name) for name in datasets_names]
-    comdined_dataset = combine_datasets(datasets, new_dataset_id=f"{config.env_name}-dataset-v{config.version}")
-
-    for name in datasets_names:
-        minari.delete_dataset(name)
+    datasets_paths = glob(f"{config.data_path}/{config.env_name}-*-v{config.version}.hdf5")
+    combine_datasets(
+        datasets_paths,
+        new_path=os.path.join(config.data_path, f"{config.env_name}-dataset-v{config.version}.hdf5")
+    )
+    for path in datasets_paths:
+        if "dataset" not in path:
+            os.remove(path)
 
 
 if __name__ == "__main__":
