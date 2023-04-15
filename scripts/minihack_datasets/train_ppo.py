@@ -27,8 +27,8 @@ class ModelConfig:
     use_index_select: bool = True  # use index select instead of normal embedding lookup
     layers: int = 5  # number of cnn layers for crop/glyph model
     msg_model: Optional[str] = None  # character model: none, lt_cnn*, cnn, gru, lstm
-    msg_hidden_dim: int = 64  # recommend 256
-    msg_embedding_dim: int = 32  # recommend 64
+    msg_hidden_dim: int = 256  # recommend 256
+    msg_embedding_dim: int = 64  # recommend 64
     equalize_input_dim: bool = False  # project inputs to same dim (*false unless doing dynamics)
     equalize_factor: int = 2  # multiplies hdim by this when equalize is enabled (2 > 1)
 
@@ -45,7 +45,7 @@ class TrainConfig:
     # ray config
     num_gpus: int = 1
     num_cpus: int = 32
-    num_actors: int = 256
+    num_actors: int = 128
     # algo config
     gamma: float = 0.999
     learning_rate: float = 2e-4
@@ -119,6 +119,7 @@ def train(config: TrainConfig):
         )
         .resources(num_gpus=config.num_gpus)
         .debugging(seed=config.seed)
+        .environment(disable_env_checking=True)
     )
 
     tuner = tune.Tuner(
