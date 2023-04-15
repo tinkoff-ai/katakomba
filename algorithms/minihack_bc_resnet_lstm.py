@@ -25,6 +25,7 @@ torch.backends.cudnn.benchmark = True
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
+# TODO: add prev actions
 @dataclass
 class TrainConfig:
     env: str = "MiniHack-Room-Trap-15x15-v0"
@@ -46,8 +47,8 @@ class TrainConfig:
     learning_rate: float = 3e-4
     clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
-    eval_every: int = 10_000
-    eval_episodes: int = 50
+    eval_every: int = 5000
+    eval_episodes: int = 25
     eval_seed: int = 50
     train_seed: int = 42
 
@@ -55,9 +56,7 @@ class TrainConfig:
         self.group = f"{self.group}-{self.env}-{self.version}"
         self.name = f"{self.name}-{str(uuid.uuid4())[:8]}"
         if self.checkpoints_path is not None:
-            self.checkpoints_path = os.path.join(
-                self.checkpoints_path, self.group, self.name
-            )
+            self.checkpoints_path = os.path.join(self.checkpoints_path, self.group, self.name)
 
 
 def set_seed(seed: int):
