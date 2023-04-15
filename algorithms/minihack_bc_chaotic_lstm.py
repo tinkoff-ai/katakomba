@@ -12,13 +12,16 @@ import uuid
 import torch
 import torch.nn as nn
 
+import torch.nn.functional as F
 from collections import deque
 from tqdm.auto import tqdm, trange
 from torch.distributions import Categorical
 import numpy as np
 
+from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
+from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
 from typing import Optional
-from katakomba.nn.resnet import ResNet11, ResNet20, ResNet38, ResNet56, ResNet110
+
 
 torch.backends.cudnn.benchmark = True
 
@@ -40,29 +43,27 @@ class timeit:
         self.elapsed_time_cpu = time.time() - self.start_cpu
 
 
-# TODO: add prev actions
 @dataclass
 class TrainConfig:
     env: str = "MiniHack-Room-Trap-15x15-v0"
     data_path: str = "data/MiniHack-Room-Trap-15x15-v0-dataset-v0.hdf5"
     # Wandb logging
     project: str = "MiniHack"
-    group: str = "ResNetBC"
-    name: str = "ResNetBC"
+    group: str = "ChaoticBC"
+    name: str = "ChaoticBC"
     version: str = "v0"
     # Model
-    resnet_type: str = "ResNet11"
-    lstm_layers: int = 1
-    hidden_dim: int = 512
-    width_k: int = 1
+    rnn_hidden_dim: int = 512
+    rnn_layers: int = 1
+    use_prev_action: bool = True
     # Training
-    update_steps: int = 5000
+    update_steps: int = 180_000
     batch_size: int = 256
-    seq_len: int = 8
+    seq_len: int = 32
     learning_rate: float = 3e-4
     clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
-    eval_every: int = 100
+    eval_every: int = 1000
     eval_episodes: int = 25
     eval_seed: int = 50
     train_seed: int = 42
@@ -108,11 +109,14 @@ def load_trajectories(hdf5_path):
             if f[key]["rewards"][()].sum() < 0.8:
                 continue
 
+            tty_chars = f[key]["observations/tty_chars"][()][:-1]
+            tty_colors = f[key]["observations/tty_colors"][()][:-1]
+            tty_cursor = f[key]["observations/tty_cursor"][()][:-1]
+
+            screen_image = render_screen_image(tty_chars[None, :], tty_colors[None, :], tty_cursor[None, :])
             trajectory = {
-                "observations": torch.stack([
-                    torch.tensor(f[key]["observations/tty_chars"][()][:-1]),
-                    torch.tensor(f[key]["observations/tty_colors"][()][:-1])
-                ], dim=1),
+                "screen_image": torch.tensor(screen_image[0]),
+                "tty_chars": torch.tensor(tty_chars),
                 "actions": torch.tensor(f[key]["actions"][()]),
             }
             trajectories.append(trajectory)
@@ -172,34 +176,77 @@ class SequentialBuffer:
 
 
 class Actor(nn.Module):
-    def __init__(self, action_dim, hidden_dim, lstm_layers, width_k, resnet_type):
+    def __init__(self, action_dim, rnn_hidden_dim=512, rnn_layers=1, use_prev_action=True):
         super().__init__()
-        resnet = getattr(sys.modules[__name__], resnet_type)
-        self.state_encoder = resnet(img_channels=2, out_dim=hidden_dim, k=width_k)
-        self.norm = nn.LayerNorm(hidden_dim)
-        self.rnn = nn.LSTM(
-            input_size=hidden_dim,
-            hidden_size=hidden_dim,
-            num_layers=lstm_layers,
-            batch_first=True,
+        # Action dimensions and prev actions
+        self.num_actions = action_dim
+        self.use_prev_action = use_prev_action
+        self.prev_actions_dim = self.num_actions if self.use_prev_action else 0
+
+        # Encoders
+        self.topline_encoder = TopLineEncoder()
+        self.bottomline_encoder = torch.jit.script(BottomLinesEncoder())
+
+        screen_shape = (SCREEN_SHAPE[1], SCREEN_SHAPE[2])
+        self.screen_encoder = torch.jit.script(ScreenEncoder(screen_shape))
+
+        self.h_dim = sum(
+            [
+                self.topline_encoder.hidden_dim,
+                self.bottomline_encoder.hidden_dim,
+                self.screen_encoder.hidden_dim,
+                self.prev_actions_dim,
+            ]
         )
-        self.head = nn.Linear(hidden_dim, action_dim)
+        # Policy
+        self.rnn = nn.LSTM(self.h_dim, rnn_hidden_dim, num_layers=rnn_layers, batch_first=True)
+        self.head = nn.Linear(rnn_hidden_dim, self.num_actions)
 
-    def forward(self, obs, state=None):
-        # [batch_size, seq_len, ...]
-        batch_size, seq_len, *_ = obs.shape
+    def forward(self, inputs, state=None):
+        B, T, C, H, W = inputs["screen_image"].shape
+        topline = inputs["tty_chars"][..., 0, :]
+        bottom_line = inputs["tty_chars"][..., -2:, :]
 
-        out = self.state_encoder(obs.flatten(0, 1)).view(batch_size, seq_len, -1)
-        out, new_state = self.rnn(self.norm(out), state)
-        logits = self.head(out)
+        encoded_state = [
+            self.topline_encoder(
+                topline.float(memory_format=torch.contiguous_format).view(T * B, -1)
+            ),
+            self.bottomline_encoder(
+                bottom_line.float(memory_format=torch.contiguous_format).view(T * B, -1)
+            ),
+            self.screen_encoder(
+                inputs["screen_image"]
+                .float(memory_format=torch.contiguous_format)
+                .view(T * B, C, H, W)
+            ),
+        ]
+        if self.use_prev_action:
+            encoded_state.append(
+                F.one_hot(inputs["prev_actions"], self.num_actions).view(T * B, -1)
+            )
+
+        encoded_state = torch.cat(encoded_state, dim=1)
+        core_output, new_state = self.rnn(encoded_state.view(B, T, -1), state)
+        logits = self.head(core_output)
 
         return logits, new_state
 
     @torch.no_grad()
     def act(self, obs, state=None, device="cpu"):
-        assert obs.ndim == 3, "act only for single obs"
-        obs = torch.tensor(obs, device=device, dtype=torch.float32)
-        logits, new_state = self(obs[None, None, ...], state)
+        inputs = {
+            "tty_chars": torch.tensor(
+                obs["tty_chars"][np.newaxis, np.newaxis, ...], device=device
+            ),
+            "screen_image": torch.tensor(
+                obs["screen_image"][np.newaxis, np.newaxis, ...], device=device
+            ),
+            "prev_actions": torch.tensor(
+                np.array([obs["prev_actions"]]).reshape(1, 1),
+                dtype=torch.long,
+                device=device,
+            ),
+        }
+        logits, new_state = self(inputs, state)
         return torch.argmax(logits).cpu().item(), new_state
 
 
@@ -208,19 +255,26 @@ def evaluate(env, actor, num_episodes, seed=0, device="cpu"):
     actor.eval()
     returns = np.zeros(num_episodes)
 
-    rnn_state = None
     for i in trange(num_episodes, desc="Evaluation", leave=False):
         episode_reward = 0.0
 
         env.seed(seed + i, reseed=False)
         obs, done = env.reset(), False
 
+        rnn_state = None
+        obs["prev_actions"] = 0
         while not done:
-            obs = np.stack([obs["tty_chars"], obs["tty_colors"]])
+            obs["screen_image"] = render_screen_image(
+                tty_chars=obs["tty_chars"][np.newaxis, np.newaxis, ...],
+                tty_colors=obs["tty_colors"][np.newaxis, np.newaxis, ...],
+                tty_cursor=obs["tty_cursor"][np.newaxis, np.newaxis, ...],
+            )
+            obs["screen_image"] = np.squeeze(obs["screen_image"])
 
             action, rnn_state = actor.act(obs, rnn_state, device=device)
             obs, reward, done, _ = env.step(action)
             episode_reward += reward
+            obs["prev_actions"] = action
 
         returns[i] = episode_reward
 
@@ -259,56 +313,63 @@ def train(config: TrainConfig):
         seq_len=config.seq_len
     )
     actor = Actor(
-        resnet_type=config.resnet_type,
         action_dim=eval_env.action_space.n,
-        hidden_dim=config.hidden_dim,
-        lstm_layers=config.lstm_layers,
-        width_k=config.width_k,
+        use_prev_action=config.use_prev_action,
+        rnn_hidden_dim=config.rnn_hidden_dim,
+        rnn_layers=config.rnn_layers,
     ).to(DEVICE)
-    print("Number of parameters:", sum(p.numel() for p in actor.parameters()))
-    # ONLY FOR MLC/TRS
     optim = torch.optim.Adam(actor.parameters(), lr=config.learning_rate)
+    print("Number of parameters:", sum(p.numel() for p in actor.parameters()))
 
     scaler = torch.cuda.amp.GradScaler()
 
     rnn_state = None
+    prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
     for step in trange(config.update_steps, desc="Training"):
-        with timeit() as timer:
-            batch = dataset.sample()
+        # with timeit() as timer:
+        batch = {k: v.to(DEVICE) for k, v in dataset.sample().items()}
 
-        wandb.log(
-            {
-                "times/batch_loading_cpu": timer.elapsed_time_cpu,
-                "times/batch_loading_gpu": timer.elapsed_time_gpu,
-            },
-            step=step,
-        )
+        # wandb.log(
+        #     {
+        #         "times/batch_loading_cpu": timer.elapsed_time_cpu,
+        #         "times/batch_loading_gpu": timer.elapsed_time_gpu,
+        #     },
+        #     step=step,
+        # )
 
-        with timeit() as timer:
-            with torch.cuda.amp.autocast():
-                logits, rnn_state = actor(
-                    batch["observations"].to(DEVICE).to(torch.float32),
-                    state=rnn_state,
-                )
-                rnn_state = [a.detach() for a in rnn_state]
+        # with timeit() as timer:
+        with torch.cuda.amp.autocast():
+            logits, rnn_state = actor(
+                inputs={
+                    "screen_image": batch["screen_image"],
+                    "tty_chars": batch["tty_chars"],
+                    "prev_actions": torch.cat(
+                        [prev_actions.long(), batch["actions"][:, :-1].long()], dim=1
+                    )
+                },
+                state=rnn_state,
+            )
+            rnn_state = [a.detach() for a in rnn_state]
 
-                dist = Categorical(logits=logits)
-                loss = -dist.log_prob(batch["actions"].to(DEVICE)).mean()
+            dist = Categorical(logits=logits)
+            loss = -dist.log_prob(batch["actions"]).mean()
+            # update prev_actions for next iteration
+            prev_actions = batch["actions"][:, -1].unsqueeze(-1)
 
-        wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
+        # wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
 
-        with timeit() as timer:
-            scaler.scale(loss).backward()
-            # loss.backward()
-            if config.clip_grad_norm is not None:
-                scaler.unscale_(optim)
-                torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
-            # optim.step()
-            scaler.step(optim)
-            scaler.update()
-            optim.zero_grad(set_to_none=True)
+        # with timeit() as timer:
+        scaler.scale(loss).backward()
+        # loss.backward()
+        if config.clip_grad_norm is not None:
+            scaler.unscale_(optim)
+            torch.nn.utils.clip_grad_norm_(actor.parameters(), config.clip_grad_norm)
+        # optim.step()
+        scaler.step(optim)
+        scaler.update()
+        optim.zero_grad(set_to_none=True)
 
-        wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
+        # wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
 
         wandb.log({
                 "loss": loss.detach().item(),

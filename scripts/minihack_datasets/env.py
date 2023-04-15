@@ -87,13 +87,13 @@ class MiniHackInMemoryDataCollector(new_gym.Wrapper):
             # for some reason ray sometimes resetting same envs multiple times,
             # so we will keep only last reset obs as init (hopefully this is right obs for this episode)
             assert len(self.buffer[-1]["tty_chars"]) == 1
-            self.buffer[-1]["tty_chars"][0] = obs["tty_chars"]
-            self.buffer[-1]["tty_colors"][0] = obs["tty_colors"]
-            self.buffer[-1]["tty_cursor"][0] = obs["tty_cursor"]
+            self.buffer[-1]["tty_chars"][0] = obs["tty_chars"].copy()
+            self.buffer[-1]["tty_colors"][0] = obs["tty_colors"].copy()
+            self.buffer[-1]["tty_cursor"][0] = obs["tty_cursor"].copy()
         else:
-            self.buffer[-1]["tty_chars"].append(obs["tty_chars"])
-            self.buffer[-1]["tty_colors"].append(obs["tty_colors"])
-            self.buffer[-1]["tty_cursor"].append(obs["tty_cursor"])
+            self.buffer[-1]["tty_chars"].append(obs["tty_chars"].copy())
+            self.buffer[-1]["tty_colors"].append(obs["tty_colors"].copy())
+            self.buffer[-1]["tty_cursor"].append(obs["tty_cursor"].copy())
 
         return obs, info
 
@@ -101,9 +101,9 @@ class MiniHackInMemoryDataCollector(new_gym.Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
 
         self.buffer[-1]["actions"].append(action)
-        self.buffer[-1]["tty_chars"].append(obs["tty_chars"])
-        self.buffer[-1]["tty_colors"].append(obs["tty_colors"])
-        self.buffer[-1]["tty_cursor"].append(obs["tty_cursor"])
+        self.buffer[-1]["tty_chars"].append(obs["tty_chars"].copy())
+        self.buffer[-1]["tty_colors"].append(obs["tty_colors"].copy())
+        self.buffer[-1]["tty_cursor"].append(obs["tty_cursor"].copy())
         self.buffer[-1]["rewards"].append(reward)
         self.buffer[-1]["terminations"].append(terminated)
         self.buffer[-1]["truncations"].append(truncated)
