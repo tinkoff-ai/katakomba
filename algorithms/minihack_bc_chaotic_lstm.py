@@ -57,13 +57,13 @@ class TrainConfig:
     rnn_layers: int = 1
     use_prev_action: bool = True
     # Training
-    update_steps: int = 180_000
+    update_steps: int = 5000
     batch_size: int = 256
-    seq_len: int = 32
+    seq_len: int = 8
     learning_rate: float = 3e-4
     clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
-    eval_every: int = 1000
+    eval_every: int = 100
     eval_episodes: int = 25
     eval_seed: int = 50
     train_seed: int = 42
@@ -106,8 +106,8 @@ def load_trajectories(hdf5_path):
 
     with h5py.File(hdf5_path, "r") as f:
         for key in tqdm(list(f["/"].keys())):  #[:500]
-            if f[key]["rewards"][()].sum() < 0.8:
-                continue
+            # if f[key]["rewards"][()].sum() < 0.8:
+            #     continue
 
             tty_chars = f[key]["observations/tty_chars"][()][:-1]
             tty_colors = f[key]["observations/tty_colors"][()][:-1]

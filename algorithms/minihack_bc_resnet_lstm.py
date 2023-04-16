@@ -11,6 +11,7 @@ import os
 import uuid
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from collections import deque
 from tqdm.auto import tqdm, trange
@@ -51,7 +52,7 @@ class TrainConfig:
     name: str = "ResNetBC"
     version: str = "v0"
     # Model
-    resnet_type: str = "ResNet11"
+    resnet_type: str = "ResNet20"
     lstm_layers: int = 1
     hidden_dim: int = 512
     width_k: int = 1
@@ -105,8 +106,8 @@ def load_trajectories(hdf5_path):
 
     with h5py.File(hdf5_path, "r") as f:
         for key in tqdm(list(f["/"].keys())):  #[:500]
-            if f[key]["rewards"][()].sum() < 0.8:
-                continue
+            # if f[key]["rewards"][()].sum() < 0.8:
+            #     continue
 
             trajectory = {
                 "observations": torch.stack([
@@ -176,30 +177,32 @@ class Actor(nn.Module):
         super().__init__()
         resnet = getattr(sys.modules[__name__], resnet_type)
         self.state_encoder = resnet(img_channels=2, out_dim=hidden_dim, k=width_k)
-        self.norm = nn.LayerNorm(hidden_dim)
         self.rnn = nn.LSTM(
-            input_size=hidden_dim,
+            input_size=hidden_dim + action_dim,
             hidden_size=hidden_dim,
             num_layers=lstm_layers,
             batch_first=True,
         )
         self.head = nn.Linear(hidden_dim, action_dim)
+        self.action_dim = action_dim
 
-    def forward(self, obs, state=None):
+    def forward(self, obs, prev_actions, state=None):
         # [batch_size, seq_len, ...]
         batch_size, seq_len, *_ = obs.shape
 
         out = self.state_encoder(obs.flatten(0, 1)).view(batch_size, seq_len, -1)
-        out, new_state = self.rnn(self.norm(out), state)
+        out = torch.cat([out, F.one_hot(prev_actions, self.action_dim)], dim=-1)
+        out, new_state = self.rnn(out, state)
         logits = self.head(out)
 
         return logits, new_state
 
     @torch.no_grad()
-    def act(self, obs, state=None, device="cpu"):
+    def act(self, obs, prev_actions, state=None, device="cpu"):
         assert obs.ndim == 3, "act only for single obs"
         obs = torch.tensor(obs, device=device, dtype=torch.float32)
-        logits, new_state = self(obs[None, None, ...], state)
+        prev_actions = torch.tensor(prev_actions, device=device, dtype=torch.long)
+        logits, new_state = self(obs[None, None, ...], prev_actions[None, None, ...], state)
         return torch.argmax(logits).cpu().item(), new_state
 
 
@@ -208,19 +211,21 @@ def evaluate(env, actor, num_episodes, seed=0, device="cpu"):
     actor.eval()
     returns = np.zeros(num_episodes)
 
-    rnn_state = None
     for i in trange(num_episodes, desc="Evaluation", leave=False):
         episode_reward = 0.0
 
         env.seed(seed + i, reseed=False)
         obs, done = env.reset(), False
 
+        rnn_state = None
+        prev_action = 0
         while not done:
             obs = np.stack([obs["tty_chars"], obs["tty_colors"]])
 
-            action, rnn_state = actor.act(obs, rnn_state, device=device)
+            action, rnn_state = actor.act(obs, prev_action, rnn_state, device=device)
             obs, reward, done, _ = env.step(action)
             episode_reward += reward
+            prev_action = action
 
         returns[i] = episode_reward
 
@@ -272,9 +277,10 @@ def train(config: TrainConfig):
     scaler = torch.cuda.amp.GradScaler()
 
     rnn_state = None
+    prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
     for step in trange(config.update_steps, desc="Training"):
         with timeit() as timer:
-            batch = dataset.sample()
+            batch = {k: v.to(DEVICE) for k, v in dataset.sample().items()}
 
         wandb.log(
             {
@@ -287,13 +293,15 @@ def train(config: TrainConfig):
         with timeit() as timer:
             with torch.cuda.amp.autocast():
                 logits, rnn_state = actor(
-                    batch["observations"].to(DEVICE).to(torch.float32),
+                    batch["observations"].to(torch.float32),
+                    torch.cat([prev_actions.long(), batch["actions"][:, :-1].long()], dim=1),
                     state=rnn_state,
                 )
                 rnn_state = [a.detach() for a in rnn_state]
 
                 dist = Categorical(logits=logits)
-                loss = -dist.log_prob(batch["actions"].to(DEVICE)).mean()
+                loss = -dist.log_prob(batch["actions"]).mean()
+                prev_actions = batch["actions"][:, -1].unsqueeze(-1)
 
         wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
 
