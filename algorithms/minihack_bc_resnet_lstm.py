@@ -111,8 +111,8 @@ def load_trajectories(hdf5_path):
 
             trajectory = {
                 "observations": torch.stack([
-                    torch.tensor(f[key]["observations/tty_chars"][()][:-1]),
-                    torch.tensor(f[key]["observations/tty_colors"][()][:-1])
+                    torch.tensor(f[key]["observations/tty_chars"][()][:-1], requires_grad=False),
+                    torch.tensor(f[key]["observations/tty_colors"][()][:-1], requires_grad=False)
                 ], dim=1),
                 "actions": torch.tensor(f[key]["actions"][()]),
             }
