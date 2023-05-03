@@ -120,7 +120,7 @@ def main(config: Config):
             g.create_dataset("rewards", data=data["rewards"], compression="gzip")
             g.create_dataset("dones", data=data["dones"], compression="gzip")
 
-    with zipfile.ZipFile(os.path.join(config.save_path, f"data-{file_name}.hdf5.zip"), "w", zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(os.path.join(config.save_path, f"data-{file_name}.hdf5.zip"), "w", zipfile.ZIP_BZIP2) as zf:
         zf.write(os.path.join(config.save_path, f"data-{file_name}.hdf5"))
 
     os.remove(dbfilename)
