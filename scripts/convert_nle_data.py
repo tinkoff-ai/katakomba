@@ -1,18 +1,31 @@
 import os
 import json
 import h5py
-import argparse
+import zipfile
 import numpy as np
 import nle.dataset as nld
 
-from tqdm.auto import tqdm, trange
+import pyrallis
+from dataclasses import dataclass
+from typing import Optional
+
+from tqdm.auto import tqdm
 from collections import defaultdict
 from nle.nethack.actions import ACTIONS
-from nle.nethack import tty_render
 
 ACTION_MAPPING = np.zeros(256)
 for i, a in enumerate(ACTIONS):
     ACTION_MAPPING[a.value] = i
+
+
+@dataclass
+class Config:
+    data_path: str = "data/nle_data"
+    save_path: str = "data/nle_data_converted"
+    race: Optional[str] = None
+    role: Optional[str] = None
+    alignment: Optional[str] = None
+    gender: Optional[str] = None
 
 
 def reward_as_score_diff(scores):
@@ -27,8 +40,6 @@ def reward_as_score_diff(scores):
 
 
 def load_game(dataset, game_id):
-    metadata = dict(dataset.get_meta(game_id))
-
     raw_data = defaultdict(list)
     for step in dataset.get_ttyrec(game_id, 1)[:-1]:
         # check that this step is not padding
@@ -52,18 +63,27 @@ def load_game(dataset, game_id):
         "dones": np.zeros(len(raw_data["actions"]), dtype=bool)
     }
     data["dones"][-1] = True
+    return data
 
-    return data, metadata
+
+def optional_eq(x, cond):
+    if cond is not None:
+        return x == cond
+    return True
 
 
-def main(args):
-    os.makedirs(os.path.join(args.save_path, "metadata"))
-    os.makedirs(os.path.join(args.save_path, "data"))
+def name(role, race, align, gender):
+    return f"{role or 'any'}-{race or 'any'}-{align or 'any'}-{gender or 'any'}"
+
+
+@pyrallis.wrap()
+def main(config: Config):
+    os.makedirs(config.save_path, exist_ok=True)
 
     dbfilename = "tmp_ttyrecs.db"
     if not nld.db.exists(dbfilename):
         nld.db.create(dbfilename)
-        nld.add_nledata_directory(args.dataset_path, "autoascend", dbfilename)
+        nld.add_nledata_directory(config.data_path, "autoascend", dbfilename)
 
     dataset = nld.TtyrecDataset(
         "autoascend",
@@ -71,35 +91,41 @@ def main(args):
         seq_length=1,
         dbfilename=dbfilename,
     )
+    metadata = [dict(dataset.get_meta(game_id)) for game_id in dataset._gameids]
+    metadata = list(filter(
+        lambda k: (
+                optional_eq(k["role"].lower(), config.role) and
+                optional_eq(k["race"].lower(), config.race) and
+                optional_eq(k["align"].lower(), config.alignment) and
+                optional_eq(k["gender"].lower(), config.gender)
+        ),
+        metadata
+    ))
+    file_name = name(config.role, config.race, config.alignment, config.gender)
 
-    start = args.start_game_id
-    end = args.end_game_id if args.end_game_id > 0 else max(dataset._gameids)
+    # saving episode metadata as json
+    with open(os.path.join(config.save_path, f"metadata-{file_name}.json"), "w") as f:
+        json.dump(metadata, f)
 
-    for game_id in tqdm(range(start, end + 1)):
-        data, metadata = load_game(dataset, game_id)
+    # saving episodes data as compressed hdf5
+    with h5py.File(os.path.join(config.save_path, f"data-{file_name}.hdf5"), "w", track_order=True) as df:
+        for ep in tqdm(metadata):
+            data = load_game(dataset, game_id=ep["gameid"])
 
-        # saving episode metadata as json
-        with open(os.path.join(args.save_path, "metadata", f"{game_id}.json"), "w") as f:
-            json.dump(metadata, f)
+            g = df.create_group(str(ep["gameid"]))
+            g.create_dataset("tty_chars", data=data["tty_chars"], compression="gzip")
+            g.create_dataset("tty_colors", data=data["tty_colors"], compression="gzip")
+            g.create_dataset("tty_cursor", data=data["tty_cursor"], compression="gzip")
+            g.create_dataset("actions", data=data["actions"], compression="gzip")
+            g.create_dataset("rewards", data=data["rewards"], compression="gzip")
+            g.create_dataset("dones", data=data["dones"], compression="gzip")
 
-        # saving episode data as compressed hdf5
-        with h5py.File(os.path.join(args.save_path, "data", f"{game_id}.hdf5"), "w") as df:
-            df.create_dataset("tty_chars", data=data["tty_chars"], compression="gzip")
-            df.create_dataset("tty_colors", data=data["tty_colors"], compression="gzip")
-            df.create_dataset("tty_cursor", data=data["tty_cursor"], compression="gzip")
-            df.create_dataset("actions", data=data["actions"], compression="gzip")
-            df.create_dataset("rewards", data=data["rewards"], compression="gzip")
-            df.create_dataset("dones", data=data["dones"], compression="gzip")
+    with zipfile.ZipFile(os.path.join(config.save_path, f"data-{file_name}.hdf5.zip"), "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(os.path.join(config.save_path, f"data-{file_name}.hdf5"))
 
     os.remove(dbfilename)
+    os.remove(os.path.join(config.save_path, f"data-{file_name}.hdf5"))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Converter from NLD dataset ttyrec format to the hdf5 datasets.')
-    parser.add_argument("--dataset_path", type=str, default="data/nle_data")
-    parser.add_argument("--save_path", type=str, default="data/nle_data_hdf5")
-    parser.add_argument("--start_game_id", type=int, default=1)
-    parser.add_argument("--end_game_id", type=int, default=-1)
-
-    args = parser.parse_args()
-    main(args)
+    main()
