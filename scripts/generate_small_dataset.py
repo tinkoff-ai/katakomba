@@ -44,7 +44,7 @@ def stratified_sample(x, scores, num_samples, num_bins=100):
 
         sampled_ids.extend(sample.tolist())
 
-    return sampled_ids
+    return np.array(sampled_ids)
 
 
 def reward_as_score_diff(scores):
@@ -122,7 +122,7 @@ def main(config: Config):
     ))
     file_name = name(config.role, config.race, config.alignment, config.gender)
 
-    game_ids = [m["gameid"] for m in metadata]
+    game_ids = np.array([m["gameid"] for m in metadata])
     if config.num_episodes is not None:
         scores = np.array([m["points"] for m in metadata])
         game_ids = stratified_sample(game_ids, scores, config.num_episodes, num_bins=25)
