@@ -26,6 +26,27 @@ class Config:
     role: Optional[str] = None
     alignment: Optional[str] = None
     gender: Optional[str] = None
+    num_episodes: Optional[int] = None
+    clean_db_after: bool = True
+
+
+def stratified_sample(x, scores, num_samples, num_bins=100):
+    num_total = len(x)
+
+    bins, edges = np.histogram(scores, bins=num_bins)
+    assert sum(bins) == num_total, "change number of bins"
+    n_strat_samples = [int(num_samples * (num_bin / num_total)) for num_bin in bins]
+
+    bin_ids = np.digitize(scores, edges)
+
+    sampled_ids = []
+    for sample_size, bin_id in zip(n_strat_samples, range(1, num_bins + 1)):
+        sample = np.random.choice(x[bin_ids == bin_id], size=sample_size, replace=False)
+        assert sample.shape[0] == sample_size
+
+        sampled_ids.extend(sample.tolist())
+
+    return sampled_ids
 
 
 def reward_as_score_diff(scores):
@@ -103,28 +124,34 @@ def main(config: Config):
     ))
     file_name = name(config.role, config.race, config.alignment, config.gender)
 
+    game_ids = [m["gameid"] for m in metadata]
+    if config.num_episodes is not None:
+        scores = np.array([m["points"] for m in metadata])
+        game_ids = stratified_sample(game_ids, scores, config.num_episodes, num_bins=25)
+        print(f"Sampled {len(game_ids)} episodes!")
+
     # saving episode metadata as json
     with open(os.path.join(config.save_path, f"metadata-{file_name}.json"), "w") as f:
         json.dump(metadata, f)
 
     # saving episodes data as compressed hdf5
     with h5py.File(os.path.join(config.save_path, f"data-{file_name}.hdf5"), "w", track_order=True) as df:
-        for ep in tqdm(metadata):
-            data = load_game(dataset, game_id=ep["gameid"])
+        for i, ep_id in enumerate(tqdm(game_ids)):
+            data = load_game(dataset, game_id=ep_id)
 
-            g = df.create_group(str(ep["gameid"]))
+            g = df.create_group(str(ep_id))
             g.create_dataset("tty_chars", data=data["tty_chars"], compression="gzip")
             g.create_dataset("tty_colors", data=data["tty_colors"], compression="gzip")
             g.create_dataset("tty_cursor", data=data["tty_cursor"], compression="gzip")
             g.create_dataset("actions", data=data["actions"], compression="gzip")
             g.create_dataset("rewards", data=data["rewards"], compression="gzip")
             g.create_dataset("dones", data=data["dones"], compression="gzip")
+            # also add metadata
+            for key, value in metadata[i].items():
+                g.attrs[key] = value
 
-    with zipfile.ZipFile(os.path.join(config.save_path, f"data-{file_name}.hdf5.zip"), "w", zipfile.ZIP_BZIP2) as zf:
-        zf.write(os.path.join(config.save_path, f"data-{file_name}.hdf5"))
-
-    os.remove(dbfilename)
-    os.remove(os.path.join(config.save_path, f"data-{file_name}.hdf5"))
+    if nld.db.exists(dbfilename) and config.clean_db_after:
+        os.remove(dbfilename)
 
 
 if __name__ == "__main__":
