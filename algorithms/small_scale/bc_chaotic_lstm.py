@@ -56,9 +56,10 @@ class TrainConfig:
     use_prev_action: bool = True
     # Training
     update_steps: int = 5000
-    batch_size: int = 128
-    seq_len: int = 8
+    batch_size: int = 64
+    seq_len: int = 16
     learning_rate: float = 3e-4
+    weight_decay: float = 0.0
     clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
     eval_every: int = 100
@@ -79,6 +80,20 @@ def set_seed(seed: int):
     np.random.seed(seed)
     random.seed(seed)
     torch.manual_seed(seed)
+
+
+@torch.no_grad()
+def filter_wd_params(model: nn.Module):
+    no_decay, decay = [], []
+    for name, param in model.named_parameters():
+        if hasattr(param, 'requires_grad') and not param.requires_grad:
+            continue
+        if 'weight' in name and 'norm' not in name and 'bn' not in name:
+            decay.append(param)
+        else:
+            no_decay.append(param)
+    assert len(no_decay) + len(decay) == len(list(model.parameters()))
+    return no_decay, decay
 
 
 def dict_slice(data, start, end):
@@ -341,7 +356,12 @@ def train(config: TrainConfig):
         rnn_hidden_dim=config.rnn_hidden_dim,
         rnn_layers=config.rnn_layers,
     ).to(DEVICE)
-    optim = torch.optim.Adam(actor.parameters(), lr=config.learning_rate)
+
+    no_decay_params, decay_params = filter_wd_params(actor)
+    optim = torch.optim.AdamW([
+        {"params": no_decay_params, "weight_decay": 0.0},
+        {"params": decay_params, "weight_decay": config.weight_decay}
+    ], lr=config.learning_rate)
     print("Number of parameters:", sum(p.numel() for p in actor.parameters()))
 
     scaler = torch.cuda.amp.GradScaler()
