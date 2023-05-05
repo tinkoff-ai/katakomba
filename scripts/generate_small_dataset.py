@@ -3,6 +3,7 @@ import h5py
 import numpy as np
 import nle.dataset as nld
 
+import random
 import pyrallis
 from dataclasses import dataclass
 from typing import Optional
@@ -25,6 +26,8 @@ class Config:
     alignment: Optional[str] = None
     gender: Optional[str] = None
     num_episodes: Optional[int] = None
+    num_bins: int = 50
+    random_seed: int = 32
     clean_db_after: bool = True
 
 
@@ -110,27 +113,31 @@ def main(config: Config):
         seq_length=1,
         dbfilename=dbfilename,
     )
-    metadata = [dict(dataset.get_meta(game_id)) for game_id in dataset._gameids]
-    metadata = list(filter(
-        lambda k: (
-                optional_eq(k["role"].lower(), config.role) and
-                optional_eq(k["race"].lower(), config.race) and
-                optional_eq(k["align"].lower(), config.alignment) and
-                optional_eq(k["gender"].lower(), config.gender)
-        ),
-        metadata
-    ))
+    # retrieving and filtering metadata from the dataset
+    metadata = {game_id: dict(dataset.get_meta(game_id)) for game_id in dataset._gameids}
+    metadata = {
+        k: v for k, v in metadata.items() if (
+            optional_eq(v["role"].lower(), config.role) and
+            optional_eq(v["race"].lower(), config.race) and
+            optional_eq(v["align"].lower(), config.alignment) and
+            optional_eq(v["gender"].lower(), config.gender)
+        )
+    }
     file_name = name(config.role, config.race, config.alignment, config.gender)
 
-    game_ids = np.array([m["gameid"] for m in metadata])
+    game_ids = np.array(list(metadata.keys()))
+    assert len(game_ids) != 0, "dataset does not have episodes with such configuration"
     if config.num_episodes is not None:
-        scores = np.array([m["points"] for m in metadata])
-        game_ids = stratified_sample(game_ids, scores, config.num_episodes, num_bins=25)
+        random.seed(config.random_seed)
+        np.random.seed(config.random_seed)
+
+        scores = np.array([metadata[game_id]["points"] for game_id in game_ids])
+        game_ids = stratified_sample(game_ids, scores, config.num_episodes, num_bins=config.num_bins)
         print(f"Sampled {len(game_ids)} episodes!")
 
     # saving episodes data as compressed hdf5
     with h5py.File(os.path.join(config.save_path, f"data-{file_name}.hdf5"), "w", track_order=True) as df:
-        for i, ep_id in enumerate(tqdm(game_ids)):
+        for ep_id in tqdm(game_ids):
             data = load_game(dataset, game_id=ep_id)
 
             g = df.create_group(str(ep_id))
@@ -140,8 +147,9 @@ def main(config: Config):
             g.create_dataset("actions", data=data["actions"], compression="gzip")
             g.create_dataset("rewards", data=data["rewards"], compression="gzip")
             g.create_dataset("dones", data=data["dones"], compression="gzip")
+
             # also save metadata as attrs
-            for key, value in metadata[i].items():
+            for key, value in metadata[ep_id].items():
                 g.attrs[key] = value
 
     if nld.db.exists(dbfilename) and config.clean_db_after:

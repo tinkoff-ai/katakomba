@@ -18,10 +18,10 @@ combos=(
     "cav dwa law"
     "cav gno neu"
 
-    "hea num neu"
+    "hea hum neu"
     "hea gno neu"
 
-    "kni num law"
+    "kni hum law"
 
     "mon hum neu"
     "mon hum law"
