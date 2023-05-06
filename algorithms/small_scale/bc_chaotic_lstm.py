@@ -46,7 +46,7 @@ class TrainConfig:
     character: str = "mon-hum-neu"
     data_path: str = "data"
     # Wandb logging
-    project: str = "HetHack"
+    project: str = "NetHack"
     group: str = "small_scale"
     name: str = "ChaoticBC"
     version: str = "v0"
@@ -80,6 +80,21 @@ def set_seed(seed: int):
     np.random.seed(seed)
     random.seed(seed)
     torch.manual_seed(seed)
+
+
+def _memmap_to_h5(path, h5path):
+    with h5py.File(path) as f:
+        ds = f[h5path]
+        # We get the dataset address in the HDF5 fiel.
+        offset = ds.id.get_offset()
+        # We ensure we have a non-compressed contiguous array.
+        assert ds.chunks is None
+        assert ds.compression is None
+        assert offset > 0
+        dtype = ds.dtype
+        shape = ds.shape
+    arr = np.memmap(path, mode='r', shape=shape, offset=offset, dtype=dtype)
+    return arr
 
 
 @torch.no_grad()
@@ -116,14 +131,15 @@ def dict_to_tensor(data, device):
 def load_trajectories(hdf5_path):
     trajectories = []
     with h5py.File(hdf5_path, "r") as f:
-        for key in tqdm(list(f["/"].keys())):
-            trajectories.append({
-                "tty_chars": f[key]["observations/tty_chars"][()][:-1],
-                "tty_colors": f[key]["observations/tty_colors"][()][:-1],
-                "tty_cursor": f[key]["observations/tty_cursor"][()][:-1],
-                "actions": f[key]["actions"][()]
-            })
+        keys = list(f["/"].keys())
 
+    for key in tqdm(keys):
+        trajectories.append({
+            "tty_chars": _memmap_to_h5(hdf5_path, f"{key}/tty_chars"),
+            "tty_colors": _memmap_to_h5(hdf5_path, f"{key}/tty_colors"),
+            "tty_cursor": _memmap_to_h5(hdf5_path, f"{key}/tty_cursor"),
+            "actions": _memmap_to_h5(hdf5_path, f"{key}/actions")
+        })
     print(f"Loaded total {len(trajectories)} trajectories!")
     return trajectories
 
@@ -351,7 +367,7 @@ def train(config: TrainConfig):
     )
 
     actor = Actor(
-        action_dim=eval_env.action_space.n,
+        action_dim=eval_env.single_action_space.n,
         use_prev_action=config.use_prev_action,
         rnn_hidden_dim=config.rnn_hidden_dim,
         rnn_layers=config.rnn_layers,

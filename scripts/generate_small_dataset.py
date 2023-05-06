@@ -69,9 +69,7 @@ def load_game(dataset, game_id):
         raw_data["tty_chars"].append(step["tty_chars"].squeeze())
         raw_data["tty_colors"].append(step["tty_colors"].squeeze())
         raw_data["tty_cursor"].append(step["tty_cursor"].squeeze())
-
         raw_data["actions"].append(ACTION_MAPPING[step["keypresses"].item()])
-        # raw_data["done"].append(step["done"].item())
         raw_data["scores"].append(step["scores"].item())
 
     data = {
@@ -135,19 +133,18 @@ def main(config: Config):
         game_ids = stratified_sample(game_ids, scores, config.num_episodes, num_bins=config.num_bins)
         print(f"Sampled {len(game_ids)} episodes!")
 
-    # saving episodes data as compressed hdf5
+    # saving episodes data as uncompressed hdf5
     with h5py.File(os.path.join(config.save_path, f"data-{file_name}.hdf5"), "w", track_order=True) as df:
         for ep_id in tqdm(game_ids):
             data = load_game(dataset, game_id=ep_id)
 
             g = df.create_group(str(ep_id))
-            g.create_dataset("tty_chars", data=data["tty_chars"], compression="gzip")
-            g.create_dataset("tty_colors", data=data["tty_colors"], compression="gzip")
-            g.create_dataset("tty_cursor", data=data["tty_cursor"], compression="gzip")
-            g.create_dataset("actions", data=data["actions"], compression="gzip")
-            g.create_dataset("rewards", data=data["rewards"], compression="gzip")
-            g.create_dataset("dones", data=data["dones"], compression="gzip")
-
+            g.create_dataset("tty_chars", data=data["tty_chars"])
+            g.create_dataset("tty_colors", data=data["tty_colors"])
+            g.create_dataset("tty_cursor", data=data["tty_cursor"])
+            g.create_dataset("actions", data=data["actions"])
+            g.create_dataset("rewards", data=data["rewards"])
+            g.create_dataset("dones", data=data["dones"])
             # also save metadata as attrs
             for key, value in metadata[ep_id].items():
                 g.attrs[key] = value
