@@ -3,6 +3,7 @@ import h5py
 import numpy as np
 import nle.dataset as nld
 
+import zipfile
 import random
 import pyrallis
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ class Config:
     num_bins: int = 50
     random_seed: int = 32
     clean_db_after: bool = True
+    compress_after: bool = True
 
 
 def stratified_sample(x, scores, num_samples, num_bins=100):
@@ -148,6 +150,14 @@ def main(config: Config):
             # also save metadata as attrs
             for key, value in metadata[ep_id].items():
                 g.attrs[key] = value
+
+    # clearing and compressing at the end
+    if config.compress_after:
+        hdf5_path = os.path.join(config.save_path, f"data-{file_name}.hdf5")
+
+        with zipfile.ZipFile(f"{hdf5_path}.zip", "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(os.path.join(config.save_path, f"data-{file_name}.hdf5"))
+        os.remove(hdf5_path)
 
     if nld.db.exists(dbfilename) and config.clean_db_after:
         os.remove(dbfilename)
