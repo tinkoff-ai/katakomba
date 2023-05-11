@@ -6,7 +6,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 DATA_PATH = os.environ.get('KATAKOMBA_DATA_DIR', os.path.expanduser('~/.katakomba/datasets'))
-os.makedirs(DATA_PATH, exist_ok=True)
+CACHE_PATH = os.environ.get('KATAKOMBA_CACHE_DIR', os.path.expanduser('~/.katakomba/cache'))
 
 
 def _flush_to_memmap(filename: str, array: np.ndarray):
@@ -18,7 +18,9 @@ def _flush_to_memmap(filename: str, array: np.ndarray):
 
 # TODO: add desc to the tqdm
 def load_nld_aa_dataset(character, mode="in_memory"):
-    # TODO: download dataset first, for now just loading from the path
+    # TODO: check if exists and download dataset first, for now just loading from the path
+    # os.makedirs(DATA_PATH, exist_ok=True)
+
     dataset_path = os.path.join(DATA_PATH, f"data-{character}-any.hdf5")
     df = h5py.File(dataset_path, "r")
     if mode == "in_memory":
@@ -30,11 +32,13 @@ def load_nld_aa_dataset(character, mode="in_memory"):
             trajectories[episode] = episode_data
 
     elif mode == "memmap":
+        os.makedirs(CACHE_PATH, exist_ok=True)
+
         trajectories = {}
         for episode in tqdm(df["/"].keys()):
             episode_data = {
                 k: _flush_to_memmap(
-                    os.path.join(DATA_PATH, f"memmap-data-{character}-any", str(episode), str(k)),
+                    os.path.join(CACHE_PATH, f"memmap-data-{character}-any", str(episode), str(k)),
                     array=df[episode][k][()]
                 )
                 for k in df[episode].keys()
@@ -76,7 +80,7 @@ class NLDDataset:
         self.hdf5_file.close()
         # remove memmap files from the disk upon closing
         if self.mode == "memmap":
-            shutil.rmtree(os.path.join(DATA_PATH, f"memmap-data-{self.character}-any"))
+            shutil.rmtree(os.path.join(CACHE_PATH, f"memmap-data-{self.character}-any"))
 
 
 def dict_slice(data, start, end):

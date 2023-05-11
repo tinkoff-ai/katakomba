@@ -43,10 +43,11 @@ class timeit:
             self.elapsed_time_gpu = -1.0
         self.elapsed_time_cpu = time.time() - self.start_cpu
 
+
 @dataclass
 class TrainConfig:
     character: str = "mon-hum-neu"
-    data_mode: str = "compressed"
+    data_mode: str = "memmap"
     # Wandb logging
     project: str = "NetHack"
     group: str = "small_scale"
@@ -382,6 +383,8 @@ def train(config: TrainConfig):
                     os.path.join(config.checkpoints_path, f"{step}.pt"),
                 )
                 np.save(os.path.join(config.checkpoints_path, f"{step}_returns.npy"), raw_returns)
+
+    buffer.close()
 
 
 if __name__ == "__main__":

@@ -10,7 +10,6 @@ from .utils import NLDDataset
 class SequentialBuffer:
     def __init__(self, character, batch_size, seq_len, mode, add_next_step=False, seed=0):
         self.traj = NLDDataset(character, mode=mode)
-
         self.traj_idxs = list(range(len(self.traj)))
         # shuffle staring trajectories indices
         random.seed(seed)
@@ -53,3 +52,6 @@ class SequentialBuffer:
             batch.append(data)
 
         return dict_stack(batch)
+
+    def close(self):
+        return self.traj.close()
