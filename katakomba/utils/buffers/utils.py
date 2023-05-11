@@ -10,7 +10,7 @@ CACHE_PATH = os.environ.get('KATAKOMBA_CACHE_DIR', os.path.expanduser('~/.katako
 
 
 def _flush_to_memmap(filename: str, array: np.ndarray):
-    mmap = np.memmap(filename, mode="w+", dtype=array.dtype, shape=array.dtype)
+    mmap = np.memmap(filename, mode="w+", dtype=array.dtype, shape=array.shape)
     mmap[:] = array
     mmap.flush()
     return mmap
@@ -36,9 +36,12 @@ def load_nld_aa_dataset(character, mode="in_memory"):
 
         trajectories = {}
         for episode in tqdm(df["/"].keys()):
+            episode_cache_path = os.path.join(CACHE_PATH, f"memmap-data-{character}-any", str(episode))
+
+            os.makedirs(episode_cache_path, exist_ok=True)
             episode_data = {
                 k: _flush_to_memmap(
-                    os.path.join(CACHE_PATH, f"memmap-data-{character}-any", str(episode), str(k)),
+                    filename=os.path.join(episode_cache_path, str(k)),
                     array=df[episode][k][()]
                 )
                 for k in df[episode].keys()
