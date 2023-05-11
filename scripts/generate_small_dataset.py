@@ -29,8 +29,8 @@ class Config:
     num_episodes: Optional[int] = None
     num_bins: int = 50
     random_seed: int = 32
-    clean_db_after: bool = True
-    compress_after: bool = True
+    clean_db_after: bool = False
+    compress_after: bool = False
 
 
 def stratified_sample(x, scores, num_samples, num_bins=100):
@@ -141,12 +141,12 @@ def main(config: Config):
             data = load_game(dataset, game_id=ep_id)
 
             g = df.create_group(str(ep_id))
-            g.create_dataset("tty_chars", data=data["tty_chars"])
-            g.create_dataset("tty_colors", data=data["tty_colors"])
-            g.create_dataset("tty_cursor", data=data["tty_cursor"])
-            g.create_dataset("actions", data=data["actions"])
-            g.create_dataset("rewards", data=data["rewards"])
-            g.create_dataset("dones", data=data["dones"])
+            g.create_dataset("tty_chars", data=data["tty_chars"], compression="gzip")
+            g.create_dataset("tty_colors", data=data["tty_colors"], compression="gzip")
+            g.create_dataset("tty_cursor", data=data["tty_cursor"], compression="gzip")
+            g.create_dataset("actions", data=data["actions"], compression="gzip")
+            g.create_dataset("rewards", data=data["rewards"], compression="gzip")
+            g.create_dataset("dones", data=data["dones"], compression="gzip")
             # also save metadata as attrs
             for key, value in metadata[ep_id].items():
                 g.attrs[key] = value

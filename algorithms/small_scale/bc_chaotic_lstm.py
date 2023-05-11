@@ -1,7 +1,6 @@
 import pyrallis
 from dataclasses import dataclass, asdict
 import time
-import h5py
 import random
 import wandb
 import os
@@ -12,7 +11,6 @@ import torch.nn as nn
 from gym.vector import AsyncVectorEnv
 from concurrent.futures import ThreadPoolExecutor
 import torch.nn.functional as F
-from itertools import cycle
 from tqdm.auto import tqdm, trange
 from torch.distributions import Categorical
 import numpy as np
@@ -20,6 +18,7 @@ import numpy as np
 from katakomba.envs import NetHackChallenge
 from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
+from katakomba.utils.buffers.replay import SequentialBuffer
 from typing import Optional
 
 torch.backends.cudnn.benchmark = True
@@ -28,23 +27,26 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 class timeit:
     def __enter__(self):
-        self.start_gpu = torch.cuda.Event(enable_timing=True)
-        self.end_gpu = torch.cuda.Event(enable_timing=True)
+        if torch.cuda.is_available():
+            self.start_gpu = torch.cuda.Event(enable_timing=True)
+            self.end_gpu = torch.cuda.Event(enable_timing=True)
+            self.start_gpu.record()
         self.start_cpu = time.time()
-        self.start_gpu.record()
         return self
 
     def __exit__(self, type, value, traceback):
-        self.end_gpu.record()
-        torch.cuda.synchronize()
-        self.elapsed_time_gpu = self.start_gpu.elapsed_time(self.end_gpu) / 1000
+        if torch.cuda.is_available():
+            self.end_gpu.record()
+            torch.cuda.synchronize()
+            self.elapsed_time_gpu = self.start_gpu.elapsed_time(self.end_gpu) / 1000
+        else:
+            self.elapsed_time_gpu = -1.0
         self.elapsed_time_cpu = time.time() - self.start_cpu
-
 
 @dataclass
 class TrainConfig:
     character: str = "mon-hum-neu"
-    data_path: str = "data"
+    data_mode: str = "compressed"
     # Wandb logging
     project: str = "NetHack"
     group: str = "small_scale"
@@ -54,16 +56,17 @@ class TrainConfig:
     rnn_hidden_dim: int = 2048
     rnn_layers: int = 2
     use_prev_action: bool = True
+    rnn_dropout: float = 0.1
     # Training
-    update_steps: int = 5000
+    update_steps: int = 500_000
     batch_size: int = 64
     seq_len: int = 16
     learning_rate: float = 3e-4
     weight_decay: float = 0.0
     clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
-    eval_every: int = 100
-    eval_episodes: int = 25
+    eval_every: int = 10_000
+    eval_episodes: int = 50
     eval_processes: int = 14
     eval_seed: int = 50
     train_seed: int = 42
@@ -82,21 +85,6 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
 
 
-def _memmap_to_h5(path, h5path):
-    with h5py.File(path) as f:
-        ds = f[h5path]
-        # We get the dataset address in the HDF5 fiel.
-        offset = ds.id.get_offset()
-        # We ensure we have a non-compressed contiguous array.
-        assert ds.chunks is None
-        assert ds.compression is None
-        assert offset > 0
-        dtype = ds.dtype
-        shape = ds.shape
-    arr = np.memmap(path, mode='r', shape=shape, offset=offset, dtype=dtype)
-    return arr
-
-
 @torch.no_grad()
 def filter_wd_params(model: nn.Module):
     no_decay, decay = [], []
@@ -111,94 +99,12 @@ def filter_wd_params(model: nn.Module):
     return no_decay, decay
 
 
-def dict_slice(data, start, end):
-    return {k: v[start:end] for k, v in data.items()}
-
-
-def dict_concat(datas):
-    return {k: np.concatenate([d[k] for d in datas]) for k in datas[0].keys()}
-
-
-def dict_stack(datas):
-    return {k: np.stack([d[k] for d in datas]) for k in datas[0].keys()}
-
-
 def dict_to_tensor(data, device):
     return {k: torch.as_tensor(v, device=device) for k, v in data.items()}
 
 
-# TODO: here should be function like load_dataset that will download dataset or load it from cache dir!
-def load_trajectories(hdf5_path):
-    trajectories = []
-    with h5py.File(hdf5_path, "r") as f:
-        keys = list(f["/"].keys())
-
-    for key in tqdm(keys):
-        trajectories.append({
-            "tty_chars": _memmap_to_h5(hdf5_path, f"{key}/tty_chars"),
-            "tty_colors": _memmap_to_h5(hdf5_path, f"{key}/tty_colors"),
-            "tty_cursor": _memmap_to_h5(hdf5_path, f"{key}/tty_cursor"),
-            "actions": _memmap_to_h5(hdf5_path, f"{key}/actions")
-        })
-    print(f"Loaded total {len(trajectories)} trajectories!")
-    return trajectories
-
-
-class SequentialBuffer:
-    def __init__(self, trajectories, batch_size, seq_len):
-        assert batch_size < len(trajectories)
-        self.traj = trajectories
-        self.traj_idxs = list(range(len(self.traj)))
-
-        self.batch_size = batch_size
-        self.seq_len = seq_len
-
-        random.shuffle(self.traj_idxs)
-        self.free_traj = cycle(self.traj_idxs)
-        self.curr_traj = np.array([next(self.free_traj) for _ in range(batch_size)], dtype=int)
-        self.curr_idx = np.zeros(batch_size, dtype=int)
-        # needed for faster rendering of tty as images
-        self.tp = ThreadPoolExecutor(max_workers=14)
-
-    def sample(self, device="cpu"):
-        batch = []
-
-        for i in range(self.batch_size):
-            traj_idx = self.curr_traj[i]
-            start_idx = self.curr_idx[i]
-
-            data = dict_slice(self.traj[traj_idx], start_idx, start_idx + self.seq_len)
-
-            if len(data["actions"]) < self.seq_len:
-                # if next traj will have total_len < seq_len, then get next until data is seq_len
-                while len(data["actions"]) < self.seq_len:
-                    traj_idx = next(self.free_traj)
-                    len_diff = self.seq_len - len(data["actions"])
-
-                    data = dict_concat([
-                        data,
-                        dict_slice(self.traj[traj_idx], 0, len_diff),
-                    ])
-                    self.curr_traj[i] = traj_idx
-                    self.curr_idx[i] = len_diff
-            else:
-                self.curr_idx[i] += self.seq_len
-
-            batch.append(data)
-
-        batch = dict_stack(batch)
-        screen_image = render_screen_image(
-            tty_chars=batch["tty_chars"],
-            tty_colors=batch["tty_colors"],
-            tty_cursor=batch["tty_cursor"],
-            threadpool=self.tp,
-        )
-        batch["screen_image"] = screen_image
-        return dict_to_tensor(batch, device=device)
-
-
 class Actor(nn.Module):
-    def __init__(self, action_dim, rnn_hidden_dim=512, rnn_layers=1, use_prev_action=True):
+    def __init__(self, action_dim, rnn_hidden_dim=512, rnn_layers=1, rnn_dropout=0.0, use_prev_action=True):
         super().__init__()
         # Action dimensions and prev actions
         self.num_actions = action_dim
@@ -221,7 +127,13 @@ class Actor(nn.Module):
             ]
         )
         # Policy
-        self.rnn = nn.LSTM(self.h_dim, rnn_hidden_dim, num_layers=rnn_layers, batch_first=True)
+        self.rnn = nn.LSTM(
+            self.h_dim,
+            rnn_hidden_dim,
+            num_layers=rnn_layers,
+            dropout=rnn_dropout,
+            batch_first=True
+        )
         self.head = nn.Linear(rnn_hidden_dim, self.num_actions)
 
     def forward(self, inputs, state=None):
@@ -349,6 +261,7 @@ def train(config: TrainConfig):
             pyrallis.dump(config, f)
 
     set_seed(config.train_seed)
+    # TODO: use enums and filters for env builder
     env_f = lambda: NetHackChallenge(
         character=config.character,
         observation_keys=["tty_chars", "tty_colors", "tty_cursor"]
@@ -358,13 +271,16 @@ def train(config: TrainConfig):
         shared_memory=True,
         copy=False
     )
-
-    trajectories = load_trajectories(os.path.join(config.data_path, f"data-{config.character}-any.hdf5"))
-    dataset = SequentialBuffer(
-        trajectories=trajectories,
+    # NOTE: actual len will be seq_len + 1 and next batch will start from last obs in the prev batch
+    buffer = SequentialBuffer(
+        character=config.character,
+        seq_len=config.seq_len,
         batch_size=config.batch_size,
-        seq_len=config.seq_len
+        mode=config.data_mode,
+        seed=config.train_seed,
+        add_next_step=False
     )
+    tp = ThreadPoolExecutor(max_workers=14)
 
     actor = Actor(
         action_dim=eval_env.single_action_space.n,
@@ -386,7 +302,15 @@ def train(config: TrainConfig):
     prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
     for step in trange(config.update_steps, desc="Training"):
         with timeit() as timer:
-            batch = dataset.sample(device=DEVICE)
+            batch = buffer.sample()
+            screen_image = render_screen_image(
+                tty_chars=batch["tty_chars"],
+                tty_colors=batch["tty_colors"],
+                tty_cursor=batch["tty_cursor"],
+                threadpool=tp,
+            )
+            batch["screen_image"] = screen_image
+            batch = dict_to_tensor(batch, device=DEVICE)
 
         wandb.log(
             {

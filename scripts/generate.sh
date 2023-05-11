@@ -1,6 +1,6 @@
 #!/bin/bash
 export DATA_PATH="../data/nle_data"
-export SAVE_PATH="../data/nle_small_data"
+export SAVE_PATH="../data/nle_medium_data"
 
 # All allowed role-race-align combos. See also: katakomba/utils/roles.py
 combos=(
@@ -63,5 +63,5 @@ do
         --data_path=$DATA_PATH \
         --save_path=$SAVE_PATH \
         --role="$1" --race="$2" --alignment="$3" \
-        --num_episodes=350
+        --num_episodes=700
 done

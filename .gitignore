@@ -24,6 +24,7 @@ test.ipynb
 .ml-job-preset.yml
 mlc_run.sh
 wandb
+bin
 algorithms/bc_resnet_lstm_accelerate.py
 
 # C extensions
