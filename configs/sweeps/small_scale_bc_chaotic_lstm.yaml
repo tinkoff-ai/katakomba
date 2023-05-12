@@ -3,8 +3,10 @@ project: NetHack
 program: algorithms/small_scale/bc_chaotic_lstm.py
 method: grid
 parameters:
-  data_path:
-    value: "data/nle_medium_data"
+  group:
+    value: "first_sweep"
+  data_mode:
+    value: "memmap"
   character:
     values: [
       "arc-hum-law",
@@ -60,3 +62,8 @@ parameters:
     ]
   train_seed:
     value: 0
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - ${args}

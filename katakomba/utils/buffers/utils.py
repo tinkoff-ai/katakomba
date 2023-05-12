@@ -10,6 +10,7 @@ CACHE_PATH = os.environ.get('KATAKOMBA_CACHE_DIR', os.path.expanduser('~/.katako
 
 
 def _flush_to_memmap(filename: str, array: np.ndarray):
+    # TODO: do not flush and copy data if filename alreade exists
     mmap = np.memmap(filename, mode="w+", dtype=array.dtype, shape=array.shape)
     mmap[:] = array
     mmap.flush()
@@ -20,9 +21,9 @@ def _flush_to_memmap(filename: str, array: np.ndarray):
 def load_nld_aa_dataset(character, mode="in_memory"):
     # TODO: check if exists and download dataset first, for now just loading from the path
     # os.makedirs(DATA_PATH, exist_ok=True)
-
     dataset_path = os.path.join(DATA_PATH, f"data-{character}-any.hdf5")
     df = h5py.File(dataset_path, "r")
+
     if mode == "in_memory":
         trajectories = {}
         for episode in tqdm(df["/"].keys()):

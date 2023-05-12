@@ -51,13 +51,13 @@ class TrainConfig:
     # Wandb logging
     project: str = "NetHack"
     group: str = "small_scale"
-    name: str = "ChaoticBC"
+    name: str = "bc"
     version: str = "v0"
     # Model
     rnn_hidden_dim: int = 2048
     rnn_layers: int = 2
     use_prev_action: bool = True
-    rnn_dropout: float = 0.1
+    rnn_dropout: float = 0.0
     # Training
     update_steps: int = 500_000
     batch_size: int = 64
@@ -73,8 +73,8 @@ class TrainConfig:
     train_seed: int = 42
 
     def __post_init__(self):
-        self.group = f"{self.group}-{self.character}-{self.version}"
-        self.name = f"{self.name}-{str(uuid.uuid4())[:8]}"
+        self.group = f"{self.group}-{self.version}"
+        self.name = f"{self.name}-{self.character}-{str(uuid.uuid4())[:8]}"
         if self.checkpoints_path is not None:
             self.checkpoints_path = os.path.join(self.checkpoints_path, self.group, self.name)
 
