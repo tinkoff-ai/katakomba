@@ -26,6 +26,7 @@ class Config:
     role: Optional[str] = None
     alignment: Optional[str] = None
     gender: Optional[str] = None
+    sampling: Optional[str] = None   # "sort" or "stratify"
     num_episodes: Optional[int] = None
     num_bins: int = 50
     random_seed: int = 32
@@ -127,13 +128,21 @@ def main(config: Config):
 
     game_ids = np.array(list(metadata.keys()))
     assert len(game_ids) != 0, "dataset does not have episodes with such configuration"
-    if config.num_episodes is not None:
-        random.seed(config.random_seed)
-        np.random.seed(config.random_seed)
-
+    if config.sampling is not None:
         scores = np.array([metadata[game_id]["points"] for game_id in game_ids])
-        game_ids = stratified_sample(game_ids, scores, config.num_episodes, num_bins=config.num_bins)
-        print(f"Sampled {len(game_ids)} episodes!")
+
+        if config.sampling == "stratify":
+            random.seed(config.random_seed)
+            np.random.seed(config.random_seed)
+
+            game_ids = stratified_sample(game_ids, scores, config.num_episodes, num_bins=config.num_bins)
+            print(f"Sampled {len(game_ids)} episodes with stratified sampling!")
+        elif config.sampling == "sort":
+            game_ids = game_ids[np.argsort(scores)][-config.num_episodes:]
+            mean_score = np.mean(np.sort(scores)[-config.num_episodes:])
+            print(f"Sampled episodes with top {config.num_episodes} scores. Mean score: {mean_score}")
+        else:
+            raise RuntimeError("Unknown sampling type")
 
     # saving episodes data as uncompressed hdf5
     with h5py.File(os.path.join(config.save_path, f"data-{file_name}.hdf5"), "w", track_order=True) as df:
