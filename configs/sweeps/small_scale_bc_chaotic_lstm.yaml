@@ -1,12 +1,14 @@
-entity: howuhh
+entity: tlab
 project: NetHack
 program: algorithms/small_scale/bc_chaotic_lstm.py
 method: grid
 parameters:
   group:
-    value: "first_sweep"
+    value: "sweep_v0"
   data_mode:
     value: "memmap"
+  checkpoints_path:
+    value: "checkpoints"
   character:
     values: [
       "arc-hum-law",
@@ -23,10 +25,10 @@ parameters:
       "cav-dwa-law",
       "cav-gno-neu",
 
-      "hea-num-neu",
+      "hea-hum-neu",
       "hea-gno-neu",
 
-      "kni-num-law",
+      "kni-hum-law",
 
       "mon-hum-neu",
       "mon-hum-law",
@@ -61,7 +63,7 @@ parameters:
       "wiz-orc-cha",
     ]
   train_seed:
-    value: 0
+    values: [0, 1, 2]
 command:
   - ${env}
   - python3

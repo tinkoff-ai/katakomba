@@ -16,6 +16,7 @@ from torch.distributions import Categorical
 import numpy as np
 
 from katakomba.envs import NetHackChallenge
+from katakomba.wrappers import NetHackWrapper
 from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
 from katakomba.utils.buffers.replay import SequentialBuffer
@@ -47,7 +48,7 @@ class timeit:
 @dataclass
 class TrainConfig:
     character: str = "mon-hum-neu"
-    data_mode: str = "memmap"
+    data_mode: str = "compressed"
     # Wandb logging
     project: str = "NetHack"
     group: str = "small_scale"
@@ -189,6 +190,7 @@ def vec_evaluate(vec_env, actor, num_episodes,  seed=0, device="cpu"):
     n_envs = vec_env.num_envs
     episode_rewards = []
     episode_lengths = []
+    episode_depths = []
 
     episode_counts = np.zeros(n_envs, dtype="int")
     # Divides episodes among different sub environments in the vector as evenly as possible
@@ -223,6 +225,7 @@ def vec_evaluate(vec_env, actor, num_episodes,  seed=0, device="cpu"):
                 if dones[i]:
                     episode_rewards.append(current_rewards[i])
                     episode_lengths.append(current_lengths[i])
+                    episode_depths.append(infos[i]["current_depth"])
                     episode_counts[i] += 1
                     pbar.update(1)
 
@@ -236,7 +239,14 @@ def vec_evaluate(vec_env, actor, num_episodes,  seed=0, device="cpu"):
         "reward_std": np.std(episode_rewards),
         "reward_min": np.min(episode_rewards),
         "reward_max": np.max(episode_rewards),
-        "reward_raw": np.array(episode_rewards)
+        "reward_raw": np.array(episode_rewards),
+        # depth
+        "depth_median": np.median(episode_depths),
+        "depth_mean": np.mean(episode_depths),
+        "depth_std": np.std(episode_depths),
+        "depth_min": np.min(episode_depths),
+        "depth_max": np.max(episode_depths),
+        "depth_raw": np.array(episode_depths),
     }
     actor.train()
     return result
@@ -263,10 +273,10 @@ def train(config: TrainConfig):
 
     set_seed(config.train_seed)
     # TODO: use enums and filters for env builder
-    env_f = lambda: NetHackChallenge(
+    env_f = lambda: NetHackWrapper(NetHackChallenge(
         character=config.character,
         observation_keys=["tty_chars", "tty_colors", "tty_cursor"]
-    )
+    ))
     eval_env = AsyncVectorEnv(
         env_fns=[env_f for _ in range(config.eval_processes)],
         shared_memory=True,
@@ -366,6 +376,7 @@ def train(config: TrainConfig):
                     eval_env, actor, config.eval_episodes, config.eval_seed, device=DEVICE
                 )
             raw_returns = eval_stats.pop("reward_raw")
+            raw_depths = eval_stats.pop("depth_raw")
 
             wandb.log({
                 "times/evaluation_gpu": timer.elapsed_time_gpu,
@@ -383,6 +394,7 @@ def train(config: TrainConfig):
                     os.path.join(config.checkpoints_path, f"{step}.pt"),
                 )
                 np.save(os.path.join(config.checkpoints_path, f"{step}_returns.npy"), raw_returns)
+                np.save(os.path.join(config.checkpoints_path, f"{step}_depths.npy"), raw_depths)
 
     buffer.close()
 

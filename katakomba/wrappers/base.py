@@ -1,6 +1,7 @@
 from typing import Optional, Tuple
 
 import gym
+from nle import nethack
 from nle.env.base import NLE
 
 
@@ -43,3 +44,21 @@ class NetHackWrapper(gym.Wrapper):
             [tuple] The seeds supplied, in the form (core, disp, reseed).
         """
         return self.env.seed(core, disp, reseed)
+
+    def get_current_depth(self) -> int:
+        """
+        This returns the depth your agent is at. Note that it's not the same as the dungeon level.
+        https://nethackwiki.com/wiki/Dungeon_level
+
+        Also note that this is not representative of how well your agent's doing after you descended to the amulet of yendor.
+        But for current state-of-the-art this is good enough.
+        We do not use dungeon's level as in some cases it can be biased by the agent's experience.
+        """
+        return int(
+            self.env.last_observation[self.env._blstats_index][nethack.NLE_BL_DEPTH]
+        )
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        info["current_depth"] = self.get_current_depth()
+        return obs, reward, done, info
