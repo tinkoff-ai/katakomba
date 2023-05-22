@@ -389,12 +389,13 @@ def train(config: TrainConfig):
             ), step=step)
 
             if config.checkpoints_path is not None:
-                torch.save(
-                    actor.state_dict(),
-                    os.path.join(config.checkpoints_path, f"{step}.pt"),
-                )
+                torch.save(actor.state_dict(), os.path.join(config.checkpoints_path, f"{step}.pt"))
+                # saving raw logs
                 np.save(os.path.join(config.checkpoints_path, f"{step}_returns.npy"), raw_returns)
                 np.save(os.path.join(config.checkpoints_path, f"{step}_depths.npy"), raw_depths)
+                # also saving to wandb files for easier use in the future
+                wandb.save(os.path.join(config.checkpoints_path, f"{step}_returns.npy"))
+                wandb.save(os.path.join(config.checkpoints_path, f"{step}_depths.npy"))
 
     buffer.close()
 
