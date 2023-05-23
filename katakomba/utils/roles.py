@@ -4,7 +4,6 @@ Source: https://nethackwiki.com/wiki/Role#Role_table_by_alignment_and_race
 """
 import enum
 
-
 class Role(enum.Enum):
     ARCHEOLOGIST = "arc"
     BARBARIAN = "bar"
