@@ -1,6 +1,5 @@
 import pyrallis
 from dataclasses import dataclass, asdict
-import time
 import random
 import wandb
 import os
@@ -16,33 +15,14 @@ from torch.distributions import Categorical
 import numpy as np
 
 from katakomba.env import NetHackChallenge, OfflineNetHackChallengeWrapper
-
 from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
 from katakomba.utils.datasets import SequentialBuffer
+from katakomba.utils.misc import Timeit
 from typing import Optional
 
 torch.backends.cudnn.benchmark = True
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-
-class timeit:
-    def __enter__(self):
-        if torch.cuda.is_available():
-            self.start_gpu = torch.cuda.Event(enable_timing=True)
-            self.end_gpu = torch.cuda.Event(enable_timing=True)
-            self.start_gpu.record()
-        self.start_cpu = time.time()
-        return self
-
-    def __exit__(self, type, value, traceback):
-        if torch.cuda.is_available():
-            self.end_gpu.record()
-            torch.cuda.synchronize()
-            self.elapsed_time_gpu = self.start_gpu.elapsed_time(self.end_gpu) / 1000
-        else:
-            self.elapsed_time_gpu = -1.0
-        self.elapsed_time_cpu = time.time() - self.start_cpu
 
 
 @dataclass
@@ -51,7 +31,7 @@ class TrainConfig:
     data_mode: str = "compressed"
     # Wandb logging
     project: str = "NetHack"
-    group: str = "small_scale"
+    group: str = "small_scale_bc"
     name: str = "bc"
     version: int = 0
     # Model
@@ -299,6 +279,7 @@ def train(config: TrainConfig):
         use_prev_action=config.use_prev_action,
         rnn_hidden_dim=config.rnn_hidden_dim,
         rnn_layers=config.rnn_layers,
+        rnn_dropout=config.rnn_dropout,
     ).to(DEVICE)
 
     no_decay_params, decay_params = filter_wd_params(actor)
@@ -313,7 +294,7 @@ def train(config: TrainConfig):
     rnn_state = None
     prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
     for step in trange(1, config.update_steps + 1, desc="Training"):
-        with timeit() as timer:
+        with Timeit() as timer:
             batch = buffer.sample()
             screen_image = render_screen_image(
                 tty_chars=batch["tty_chars"],
@@ -332,7 +313,7 @@ def train(config: TrainConfig):
             step=step,
         )
 
-        with timeit() as timer:
+        with Timeit() as timer:
             with torch.cuda.amp.autocast():
                 logits, rnn_state = actor(
                     inputs={
@@ -353,7 +334,7 @@ def train(config: TrainConfig):
 
         wandb.log({"times/forward_pass": timer.elapsed_time_gpu}, step=step)
 
-        with timeit() as timer:
+        with Timeit() as timer:
             scaler.scale(loss).backward()
             # loss.backward()
             if config.clip_grad_norm is not None:
@@ -372,7 +353,7 @@ def train(config: TrainConfig):
         }, step=step)
 
         if step % config.eval_every == 0:
-            with timeit() as timer:
+            with Timeit() as timer:
                 eval_stats = vec_evaluate(
                     eval_env, actor, config.eval_episodes, config.eval_seed, device=DEVICE
                 )
