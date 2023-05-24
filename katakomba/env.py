@@ -15,8 +15,8 @@ from nle import nethack
 from nle.env.tasks import NetHackScore
 
 from katakomba.utils.scores import MEAN_SCORES_AUTOASCEND
-from katakomba.utils.data.small_scale import NLDSmallDataset
-from katakomba.utils.data.large_scale import load_nld_aa_large_dataset
+from katakomba.utils.datasets.small_scale import NLDSmallDataset
+from katakomba.utils.datasets.large_scale import load_nld_aa_large_dataset
 from katakomba.utils.roles import Role, Race, Alignment
 
 from typing import Optional, Tuple, Union
@@ -186,3 +186,8 @@ class OfflineNetHackChallengeWrapper(gym.Wrapper):
                 "Unknown dataset scale. Please specify 'small' for small"
                 " scale dataset and 'big' for NLD-AA full dataset."
             )
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+        info["current_depth"] = self.get_current_depth()
+        return obs, reward, done, info

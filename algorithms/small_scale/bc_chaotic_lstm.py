@@ -16,11 +16,10 @@ from torch.distributions import Categorical
 import numpy as np
 
 from katakomba.env import NetHackChallenge, OfflineNetHackChallengeWrapper
-from katakomba.wrappers import DepthInfoWrapper
 
 from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
-from katakomba.utils.data import SequentialBuffer
+from katakomba.utils.datasets import SequentialBuffer
 from typing import Optional
 
 torch.backends.cudnn.benchmark = True
@@ -54,7 +53,7 @@ class TrainConfig:
     project: str = "NetHack"
     group: str = "small_scale"
     name: str = "bc"
-    version: str = "v0"
+    version: int = 0
     # Model
     rnn_hidden_dim: int = 2048
     rnn_layers: int = 2
@@ -75,7 +74,7 @@ class TrainConfig:
     train_seed: int = 42
 
     def __post_init__(self):
-        self.group = f"{self.group}-{self.version}"
+        self.group = f"{self.group}-v{str(self.version)}"
         self.name = f"{self.name}-{self.character}-{str(uuid.uuid4())[:8]}"
         if self.checkpoints_path is not None:
             self.checkpoints_path = os.path.join(self.checkpoints_path, self.group, self.name)
@@ -256,10 +255,8 @@ def vec_evaluate(vec_env, actor, num_episodes,  seed=0, device="cpu"):
 @pyrallis.wrap()
 def train(config: TrainConfig):
     print(f"Device: {DEVICE}")
-    saved_config = asdict(config)
-    saved_config["mlc_job_name"] = os.environ.get("PLATFORM_JOB_NAME")
     wandb.init(
-        config=saved_config,
+        config=asdict(config),
         project=config.project,
         group=config.group,
         name=config.name,
@@ -280,7 +277,6 @@ def train(config: TrainConfig):
             observation_keys=["tty_chars", "tty_colors", "tty_cursor"]
         )
         env = OfflineNetHackChallengeWrapper(env)
-        env = DepthInfoWrapper(env)
         return env
 
     tmp_env = env_fn()
@@ -316,7 +312,7 @@ def train(config: TrainConfig):
 
     rnn_state = None
     prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
-    for step in trange(config.update_steps, desc="Training"):
+    for step in trange(1, config.update_steps + 1, desc="Training"):
         with timeit() as timer:
             batch = buffer.sample()
             screen_image = render_screen_image(
@@ -375,13 +371,14 @@ def train(config: TrainConfig):
                 "transitions": config.batch_size * config.seq_len * step,
         }, step=step)
 
-        if (step + 1) % config.eval_every == 0:
+        if step % config.eval_every == 0:
             with timeit() as timer:
                 eval_stats = vec_evaluate(
                     eval_env, actor, config.eval_episodes, config.eval_seed, device=DEVICE
                 )
             raw_returns = eval_stats.pop("reward_raw")
             raw_depths = eval_stats.pop("depth_raw")
+            normalized_scores = tmp_env.get_normalized_score(raw_returns)
 
             wandb.log({
                 "times/evaluation_gpu": timer.elapsed_time_gpu,
@@ -398,9 +395,12 @@ def train(config: TrainConfig):
                 # saving raw logs
                 np.save(os.path.join(config.checkpoints_path, f"{step}_returns.npy"), raw_returns)
                 np.save(os.path.join(config.checkpoints_path, f"{step}_depths.npy"), raw_depths)
-                # also saving to wandb files for easier use in the future
-                wandb.save(os.path.join(config.checkpoints_path, f"{step}_returns.npy"))
-                wandb.save(os.path.join(config.checkpoints_path, f"{step}_depths.npy"))
+                np.save(os.path.join(config.checkpoints_path, f"{step}_normalized_scores.npy"), normalized_scores)
+
+            # also saving to wandb files for easier use in the future
+            np.save(os.path.join(wandb.run.dir, f"{step}_returns.npy"), raw_returns)
+            np.save(os.path.join(wandb.run.dir, f"{step}_depths.npy"), raw_depths)
+            np.save(os.path.join(wandb.run.dir, f"{step}_normalized_scores.npy"), normalized_scores)
 
     buffer.close()
 

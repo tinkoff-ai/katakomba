@@ -2,10 +2,11 @@
 dev/
 
 # Data
-data/
+data
 ttyrecs.db
 
 # Misc
+run.sh
 test.py
 test.ipynb
 .ml-job-preset.yml
