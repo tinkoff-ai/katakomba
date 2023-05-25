@@ -21,7 +21,7 @@ from katakomba.env import NetHackChallenge, OfflineNetHackChallengeWrapper
 from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
 from katakomba.utils.datasets import SequentialBuffer
-from katakomba.utils.misc import Timeit
+from katakomba.utils.misc import Timeit, StatMean
 
 # TODO: what is this?
 # from katakomba.utils.stats import StatMean
@@ -47,7 +47,7 @@ class TrainConfig:
     use_prev_action: bool = True
     rnn_dropout: float = 0.0
     clip_range: float = 10.0
-    tau: float = 0.05
+    tau: float = 0.005
     gamma: float = 0.999
     alpha: float = 2.0
     # Training
@@ -56,7 +56,7 @@ class TrainConfig:
     seq_len: int = 16
     learning_rate: float = 3e-4
     weight_decay: float = 0.0
-    clip_grad_norm: Optional[float] = 4.0
+    clip_grad_norm: Optional[float] = None
     checkpoints_path: Optional[str] = None
     eval_every: int = 10_000
     eval_episodes: int = 50
@@ -351,6 +351,10 @@ def train(config: TrainConfig):
     rnn_state, target_rnn_state = None, None
     prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
 
+    # For reward normalization
+    reward_stats = StatMean(cumulative=True)
+    running_rewards = 0.0
+
     for step in trange(1, config.update_steps + 1, desc="Training"):
         with Timeit() as timer:
             batch = buffer.sample()
@@ -361,8 +365,17 @@ def train(config: TrainConfig):
                 threadpool=tp,
             )
             batch["screen_image"] = screen_image
-            # TODO: normalize reward
+
+            # Update reward statistics (as in the original nle implementation)
+            running_rewards *= config.gamma
+            running_rewards += batch["rewards"]
+            reward_stats += running_rewards ** 2
+            running_rewards *= (~batch["dones"]).astype(float)
+            # Normalize the reward
+            reward_std = reward_stats.mean() ** 0.5
+            batch["rewards"] = batch["rewards"] / max(0.01, reward_std)
             batch["rewards"] = np.clip(batch["rewards"], -config.clip_range, config.clip_range)
+
             batch = dict_to_tensor(batch, device=DEVICE)
 
         wandb.log(
