@@ -39,7 +39,7 @@ def load_nld_aa_small_dataset(
 
     if mode == "in_memory":
         trajectories = {}
-        for episode in tqdm(df["/"].keys()):
+        for episode in tqdm(df["/"].keys(), leave=False):
             episode_data = {
                 k: df[episode][k][()] for k in df[episode].keys()
             }
@@ -49,7 +49,7 @@ def load_nld_aa_small_dataset(
         os.makedirs(CACHE_PATH, exist_ok=True)
 
         trajectories = {}
-        for episode in tqdm(df["/"].keys()):
+        for episode in tqdm(df["/"].keys(), leave=False):
             cache_name = f"memmap-{dataset_name.split('.')[0]}"
             episode_cache_path = os.path.join(CACHE_PATH, cache_name, str(episode))
 
@@ -65,7 +65,7 @@ def load_nld_aa_small_dataset(
 
     elif mode == "compressed":
         trajectories = {}
-        for episode in tqdm(df["/"].keys()):
+        for episode in tqdm(df["/"].keys(), leave=False):
             # we do not copy data here! it will decompress it during reading or slicing
             episode_data = {k: df[episode][k] for k in df[episode].keys()}
             trajectories[episode] = episode_data

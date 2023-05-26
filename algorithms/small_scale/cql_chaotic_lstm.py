@@ -23,8 +23,6 @@ from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
 from katakomba.utils.datasets import SequentialBuffer
 from katakomba.utils.misc import Timeit, StatMean
 
-# TODO: what is this?
-# from katakomba.utils.stats import StatMean
 LSTM_HIDDEN = Tuple[torch.Tensor, torch.Tensor]
 UPDATE_INFO = Dict[str, Any]
 
@@ -42,7 +40,7 @@ class TrainConfig:
     name: str = "cql"
     version: int = 0
     # Model
-    rnn_hidden_dim: int = 512
+    rnn_hidden_dim: int = 2048
     rnn_layers: int = 2
     use_prev_action: bool = True
     rnn_dropout: float = 0.0
@@ -153,7 +151,6 @@ class Critic(nn.Module):
             ),
         ]
         if self.use_prev_action:
-            # print(F.one_hot(inputs["prev_actions"], self.num_actions).shape)
             encoded_state.append(
                 F.one_hot(inputs["prev_actions"], self.num_actions).view(T * B, -1)
             )
@@ -176,7 +173,6 @@ class Critic(nn.Module):
         return actions.cpu().numpy(), new_state
 
 
-# TODO: obs is a dict itself, to just slice will not work! rewrite this
 def cql_loss(
     critic: Critic,
     target_critic: Critic,
@@ -201,9 +197,9 @@ def cql_loss(
     q_pred_actions = q_pred.gather(-1, actions.to(torch.long).unsqueeze(-1)).squeeze()
     assert q_pred_actions.shape == q_target.shape
 
-    td_loss = F.mse_loss(q_pred_actions, q_target)
+    td_loss = F.mse_loss(q_pred_actions, q_target) * alpha
     # [batch_size, seq_len, num_actions] -> [batch_size, seq_len] -> 1
-    cql_loss = (torch.logsumexp(q_pred, dim=-1) - q_pred_actions).mean() * alpha
+    cql_loss = (torch.logsumexp(q_pred, dim=-1) - q_pred_actions).mean() # * alpha
 
     loss = cql_loss + td_loss
     loss_info = {
@@ -453,10 +449,10 @@ def train(config: TrainConfig):
                 np.save(os.path.join(config.checkpoints_path, f"{step}_depths.npy"), raw_depths)
                 np.save(os.path.join(config.checkpoints_path, f"{step}_normalized_scores.npy"), normalized_scores)
 
-            # also saving to wandb files for easier use in the future
-            np.save(os.path.join(wandb.run.dir, f"{step}_returns.npy"), raw_returns)
-            np.save(os.path.join(wandb.run.dir, f"{step}_depths.npy"), raw_depths)
-            np.save(os.path.join(wandb.run.dir, f"{step}_normalized_scores.npy"), normalized_scores)
+            # # also saving to wandb files for easier use in the future
+            # np.save(os.path.join(wandb.run.dir, f"{step}_returns.npy"), raw_returns)
+            # np.save(os.path.join(wandb.run.dir, f"{step}_depths.npy"), raw_depths)
+            # np.save(os.path.join(wandb.run.dir, f"{step}_normalized_scores.npy"), normalized_scores)
 
     buffer.close()
 
