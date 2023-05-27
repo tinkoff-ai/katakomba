@@ -199,7 +199,7 @@ def cql_loss(
 
     td_loss = F.mse_loss(q_pred_actions, q_target) * alpha
     # [batch_size, seq_len, num_actions] -> [batch_size, seq_len] -> 1
-    cql_loss = (torch.logsumexp(q_pred, dim=-1) - q_pred_actions).mean() # * alpha
+    cql_loss = (torch.logsumexp(q_pred, dim=-1) - q_pred_actions).mean()  # * alpha
 
     loss = cql_loss + td_loss
     loss_info = {
@@ -449,10 +449,10 @@ def train(config: TrainConfig):
                 np.save(os.path.join(config.checkpoints_path, f"{step}_depths.npy"), raw_depths)
                 np.save(os.path.join(config.checkpoints_path, f"{step}_normalized_scores.npy"), normalized_scores)
 
-            # # also saving to wandb files for easier use in the future
-            # np.save(os.path.join(wandb.run.dir, f"{step}_returns.npy"), raw_returns)
-            # np.save(os.path.join(wandb.run.dir, f"{step}_depths.npy"), raw_depths)
-            # np.save(os.path.join(wandb.run.dir, f"{step}_normalized_scores.npy"), normalized_scores)
+            # also saving to wandb files for easier use in the future
+            np.save(os.path.join(wandb.run.dir, f"{step}_returns.npy"), raw_returns)
+            np.save(os.path.join(wandb.run.dir, f"{step}_depths.npy"), raw_depths)
+            np.save(os.path.join(wandb.run.dir, f"{step}_normalized_scores.npy"), normalized_scores)
 
     buffer.close()
 
