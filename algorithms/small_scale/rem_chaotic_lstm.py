@@ -36,18 +36,18 @@ class TrainConfig:
     data_mode: str = "compressed"
     # Wandb logging
     project: str = "NetHack"
-    group: str = "small_scale_iql"
-    name: str = "iql"
+    group: str = "small_scale_rem"
+    name: str = "rem"
     version: int = 0
     # Model
     rnn_hidden_dim: int = 2048
     rnn_layers: int = 2
     use_prev_action: bool = True
     rnn_dropout: float = 0.0
+    num_heads: int = 200
     clip_range: float = 10.0
     tau: float = 0.005
     gamma: float = 0.999
-    expectile_tau: float = 0.8
     # Training
     update_steps: int = 500_000
     batch_size: int = 64
@@ -99,13 +99,17 @@ def soft_update(target, source, tau):
         tp.data.copy_((1 - tau) * tp.data + tau * sp.data)
 
 
-def asymmetric_l2_loss(u: torch.Tensor, tau: float) -> torch.Tensor:
-    return torch.mean(torch.abs(tau - (u < 0).float()) * u ** 2)
+def sample_convex_combination(size, device="cpu"):
+    weights = torch.rand(size, device=device)
+    weights = weights / weights.sum()
+    assert torch.isclose(weights.sum(), torch.tensor([1.0], device=device))
+    return weights
 
 
 class Critic(nn.Module):
-    def __init__(self, action_dim, rnn_hidden_dim=512, rnn_layers=1, rnn_dropout=0.0, use_prev_action=True):
+    def __init__(self, action_dim, num_heads, rnn_hidden_dim=512, rnn_layers=1, rnn_dropout=0.0, use_prev_action=True):
         super().__init__()
+        self.num_heads = num_heads
         self.num_actions = action_dim
         self.use_prev_action = use_prev_action
         self.prev_actions_dim = self.num_actions if self.use_prev_action else 0
@@ -117,38 +121,20 @@ class Critic(nn.Module):
         screen_shape = (SCREEN_SHAPE[1], SCREEN_SHAPE[2])
         self.screen_encoder = torch.jit.script(ScreenEncoder(screen_shape))
 
-        self.h_dim = sum(
-            [
-                self.topline_encoder.hidden_dim,
-                self.bottomline_encoder.hidden_dim,
-                self.screen_encoder.hidden_dim,
-                self.prev_actions_dim,
-            ]
-        )
-        # networks
+        self.h_dim = sum([
+            self.topline_encoder.hidden_dim,
+            self.bottomline_encoder.hidden_dim,
+            self.screen_encoder.hidden_dim,
+            self.prev_actions_dim,
+        ])
+        # Policy
         self.rnn = nn.LSTM(
             self.h_dim,
             rnn_hidden_dim,
-            num_layers=rnn_layers,
             dropout=rnn_dropout,
-            batch_first=True
-        )
-        self.vf = nn.Sequential(
-            nn.Linear(rnn_hidden_dim, rnn_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(rnn_hidden_dim, rnn_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(rnn_hidden_dim, 1)
-        )
-        # self.qf = nn.Linear(rnn_hidden_dim, self.num_actions)
-        # self.vf = nn.Linear(rnn_hidden_dim, 1)
-        self.qf = nn.Sequential(
-            nn.Linear(rnn_hidden_dim, rnn_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(rnn_hidden_dim, rnn_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(rnn_hidden_dim, self.num_actions)
-        )
+            num_layers=rnn_layers,
+            batch_first=True)
+        self.head = nn.Linear(rnn_hidden_dim, self.num_actions * num_heads)
 
     def forward(self, inputs, state=None):
         # [batch_size, seq_len, ...]
@@ -171,15 +157,13 @@ class Critic(nn.Module):
         ]
         if self.use_prev_action:
             encoded_state.append(
-                F.one_hot(inputs["prev_actions"], self.num_actions).view(T * B, -1)
+                torch.nn.functional.one_hot(inputs["prev_actions"], self.num_actions).view(T * B, -1)
             )
 
         encoded_state = torch.cat(encoded_state, dim=1)
         core_output, new_state = self.rnn(encoded_state.view(B, T, -1), state)
-        vf = self.vf(core_output)
-        qf = self.qf(core_output)
-
-        return (qf, vf), new_state
+        q_values_ensemble = self.head(core_output).view(B, T, self.num_heads, self.num_actions)
+        return q_values_ensemble, new_state
 
     @torch.no_grad()
     def vec_act(self, obs, state=None, device="cpu"):
@@ -188,12 +172,15 @@ class Critic(nn.Module):
             "screen_image": torch.tensor(obs["screen_image"][:, None], device=device),
             "prev_actions": torch.tensor(obs["prev_actions"][:, None], dtype=torch.long, device=device)
         }
-        (q_values, _), new_state = self(inputs, state)
+        q_values_ensemble, new_state = self(inputs, state)
+        q_values = q_values_ensemble.mean(2)
+        assert q_values.dim() == 3
+
         actions = torch.argmax(q_values.squeeze(1), dim=-1)
         return actions.cpu().numpy(), new_state
 
 
-def iql_loss(
+def rem_loss(
         critic: Critic,
         target_critic: Critic,
         obs: Dict[str, torch.Tensor],
@@ -203,37 +190,29 @@ def iql_loss(
         dones: torch.Tensor,
         rnn_states: LSTM_HIDDEN,
         target_rnn_states: LSTM_HIDDEN,
-        next_rnn_states: LSTM_HIDDEN,
+        convex_comb_weights: torch.Tensor,
         gamma: float,
-        expectile_tau: float,
 ):
-    # TODO: should we use separate hidden's for the target and current critic?
-    # state value function loss
     with torch.no_grad():
-        (target_q, _), new_target_rnn_states = target_critic(obs, state=target_rnn_states)
+        next_q_values, next_target_rnn_states = target_critic(next_obs, state=target_rnn_states)
+        next_q_values = (next_q_values * convex_comb_weights).sum(2)
+        next_q_values = next_q_values.max(dim=-1).values
 
-    (q_pred, v_pred), new_rnn_states = critic(obs, state=rnn_states)
-    value_loss = asymmetric_l2_loss(target_q - v_pred, expectile_tau)
-
-    # state action value function loss
-    with torch.no_grad():
-        (_, next_v), new_next_rnn_states = critic(next_obs, state=next_rnn_states)
-
-    next_q = rewards + (1 - dones) * gamma * next_v.squeeze(-1)
+        assert next_q_values.shape == rewards.shape == dones.shape
+        q_target = rewards + gamma * (1 - dones) * next_q_values
 
     assert actions.dim() == 2
-    q_pred_actions = q_pred.gather(-1, actions.to(torch.long).unsqueeze(-1)).squeeze()
-    assert q_pred_actions.shape == next_q.shape
-    td_loss = F.mse_loss(q_pred_actions, next_q)
+    q_pred, next_rnn_states = critic(obs, state=rnn_states)
+    q_pred = (q_pred * convex_comb_weights.detach()).sum(2)
+    q_pred = q_pred.gather(-1, actions.to(torch.long).unsqueeze(-1)).squeeze()
+    assert q_pred.shape == q_target.shape
 
-    loss = value_loss + td_loss
+    loss = F.mse_loss(q_pred, q_target)
     loss_info = {
-        "td_loss": td_loss.item(),
-        "value_lsos": value_loss.item(),
-        "loss": loss,
-        "next_v": next_v.mean().item(),
+        "loss": loss.item(),
+        "q_target": q_target.mean().item()
     }
-    return loss, new_rnn_states, new_target_rnn_states, new_next_rnn_states, loss_info
+    return loss, next_rnn_states, next_target_rnn_states, loss_info
 
 
 @torch.no_grad()
@@ -353,6 +332,7 @@ def train(config: TrainConfig):
 
     critic = Critic(
         action_dim=eval_env.single_action_space.n,
+        num_heads=config.num_heads,
         use_prev_action=config.use_prev_action,
         rnn_hidden_dim=config.rnn_hidden_dim,
         rnn_layers=config.rnn_layers,
@@ -369,12 +349,12 @@ def train(config: TrainConfig):
     print("Number of parameters:", sum(p.numel() for p in critic.parameters()))
 
     scaler = torch.cuda.amp.GradScaler()
-    rnn_state, target_rnn_state, next_rnn_state = None, None, None
+    rnn_state, target_rnn_state = None, None
     prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
 
-    # # For reward normalization
-    # reward_stats = StatMean(cumulative=True)
-    # running_rewards = 0.0
+    # For reward normalization
+    reward_stats = StatMean(cumulative=True)
+    running_rewards = 0.0
 
     for step in trange(1, config.update_steps + 1, desc="Training"):
         with Timeit() as timer:
@@ -387,15 +367,15 @@ def train(config: TrainConfig):
             )
             batch["screen_image"] = screen_image
 
-            # # Update reward statistics (as in the original nle implementation)
-            # running_rewards *= config.gamma
-            # running_rewards += batch["rewards"]
-            # reward_stats += running_rewards ** 2
-            # running_rewards *= (~batch["dones"]).astype(float)
-            # # Normalize the reward
-            # reward_std = reward_stats.mean() ** 0.5
-            # batch["rewards"] = batch["rewards"] / max(0.01, reward_std)
-            # batch["rewards"] = np.clip(batch["rewards"], -config.clip_range, config.clip_range)
+            # Update reward statistics (as in the original nle implementation)
+            running_rewards *= config.gamma
+            running_rewards += batch["rewards"]
+            reward_stats += running_rewards ** 2
+            running_rewards *= (~batch["dones"]).astype(float)
+            # Normalize the reward
+            reward_std = reward_stats.mean() ** 0.5
+            batch["rewards"] = batch["rewards"] / max(0.01, reward_std)
+            batch["rewards"] = np.clip(batch["rewards"], -config.clip_range, config.clip_range)
 
             batch = dict_to_tensor(batch, device=DEVICE)
 
@@ -419,7 +399,9 @@ def train(config: TrainConfig):
                     "tty_chars": batch["tty_chars"][:, 1:].contiguous(),
                     "prev_actions": batch["actions"][:, :-1].long()
                 }
-                loss, rnn_state, target_rnn_state, next_rnn_state, loss_info = iql_loss(
+
+                convex_comb_weights = sample_convex_combination(config.num_heads, device=DEVICE).view(1, 1, -1, 1)
+                loss, rnn_state, target_rnn_state, loss_info = rem_loss(
                     critic=critic,
                     target_critic=target_critic,
                     obs=obs,
@@ -429,15 +411,11 @@ def train(config: TrainConfig):
                     dones=batch["dones"][:, :-1],
                     rnn_states=rnn_state,
                     target_rnn_states=target_rnn_state,
-                    next_rnn_states=next_rnn_state,
-                    expectile_tau=config.expectile_tau,
+                    convex_comb_weights=convex_comb_weights,
                     gamma=config.gamma
                 )
-                # detaching rnn hidden states for the next iteration
                 rnn_state = [a.detach() for a in rnn_state]
                 target_rnn_state = [a.detach() for a in target_rnn_state]
-                next_rnn_state = [a.detach() for a in next_rnn_state]
-
                 # update prev_actions for next iteration (-1 is seq_len + 1, so -2)
                 prev_actions = batch["actions"][:, -2].unsqueeze(-1)
 
@@ -488,4 +466,3 @@ def train(config: TrainConfig):
 
 if __name__ == "__main__":
     train()
-
