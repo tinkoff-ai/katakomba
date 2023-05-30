@@ -372,9 +372,9 @@ def train(config: TrainConfig):
     rnn_state, target_rnn_state, next_rnn_state = None, None, None
     prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
 
-    # # For reward normalization
-    # reward_stats = StatMean(cumulative=True)
-    # running_rewards = 0.0
+    # For reward normalization
+    reward_stats = StatMean(cumulative=True)
+    running_rewards = 0.0
 
     for step in trange(1, config.update_steps + 1, desc="Training"):
         with Timeit() as timer:
@@ -387,15 +387,15 @@ def train(config: TrainConfig):
             )
             batch["screen_image"] = screen_image
 
-            # # Update reward statistics (as in the original nle implementation)
-            # running_rewards *= config.gamma
-            # running_rewards += batch["rewards"]
-            # reward_stats += running_rewards ** 2
-            # running_rewards *= (~batch["dones"]).astype(float)
-            # # Normalize the reward
-            # reward_std = reward_stats.mean() ** 0.5
-            # batch["rewards"] = batch["rewards"] / max(0.01, reward_std)
-            # batch["rewards"] = np.clip(batch["rewards"], -config.clip_range, config.clip_range)
+            # Update reward statistics (as in the original nle implementation)
+            running_rewards *= config.gamma
+            running_rewards += batch["rewards"]
+            reward_stats += running_rewards ** 2
+            running_rewards *= (~batch["dones"]).astype(float)
+            # Normalize the reward
+            reward_std = reward_stats.mean() ** 0.5
+            batch["rewards"] = batch["rewards"] / max(0.01, reward_std)
+            batch["rewards"] = np.clip(batch["rewards"], -config.clip_range, config.clip_range)
 
             batch = dict_to_tensor(batch, device=DEVICE)
 
