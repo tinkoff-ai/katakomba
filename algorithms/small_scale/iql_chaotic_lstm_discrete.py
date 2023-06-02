@@ -48,7 +48,6 @@ class TrainConfig:
     tau: float = 0.005
     gamma: float = 0.999
     expectile_tau: float = 0.8
-    temperature: float = 1.0
     # Training
     update_steps: int = 500_000
     batch_size: int = 64
@@ -100,6 +99,10 @@ def soft_update(target, source, tau):
         tp.data.copy_((1 - tau) * tp.data + tau * sp.data)
 
 
+# def asymmetric_l2_loss(u: torch.Tensor, tau: float) -> torch.Tensor:
+#     loss = torch.abs(tau - (u < 0).float()) * u ** 2
+#     return loss.sum(-1).mean()
+
 def asymmetric_l2_loss(u: torch.Tensor, tau: float) -> torch.Tensor:
     return torch.mean(torch.abs(tau - (u < 0).float()) * u ** 2)
 
@@ -134,18 +137,28 @@ class Critic(nn.Module):
             dropout=rnn_dropout,
             batch_first=True
         )
-        # in similar style to original:
-        # https://github.com/dungeonsdatasubmission/dungeonsdata-neurips2022/blob/ee72d6aac9df00a4a6ab1f501db37a632a75b952/experiment_code/hackrl/models/offline_chaotic_dwarf.py#L538
-        self.qf1 = nn.Linear(rnn_hidden_dim + self.num_actions, 1)
-        self.qf2 = nn.Linear(rnn_hidden_dim + self.num_actions, 1)
-        self.vf = nn.Linear(rnn_hidden_dim, 1)
-        self.policy = nn.Linear(rnn_hidden_dim, self.num_actions)
+        self.vf = nn.Sequential(
+            nn.Linear(rnn_hidden_dim, rnn_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(rnn_hidden_dim, rnn_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(rnn_hidden_dim, 1)
+        )
+        # self.qf = nn.Linear(rnn_hidden_dim, self.num_actions)
+        # self.vf = nn.Linear(rnn_hidden_dim, 1)
+        self.qf = nn.Sequential(
+            nn.Linear(rnn_hidden_dim, rnn_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(rnn_hidden_dim, rnn_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(rnn_hidden_dim, self.num_actions)
+        )
 
-    def forward(self, obs, state=None, actions=None):
+    def forward(self, inputs, state=None):
         # [batch_size, seq_len, ...]
-        B, T, C, H, W = obs["screen_image"].shape
-        topline = obs["tty_chars"][..., 0, :]
-        bottom_line = obs["tty_chars"][..., -2:, :]
+        B, T, C, H, W = inputs["screen_image"].shape
+        topline = inputs["tty_chars"][..., 0, :]
+        bottom_line = inputs["tty_chars"][..., -2:, :]
 
         encoded_state = [
             self.topline_encoder(
@@ -155,32 +168,22 @@ class Critic(nn.Module):
                 bottom_line.float(memory_format=torch.contiguous_format).view(T * B, -1)
             ),
             self.screen_encoder(
-                obs["screen_image"]
+                inputs["screen_image"]
                 .float(memory_format=torch.contiguous_format)
                 .view(T * B, C, H, W)
             ),
         ]
         if self.use_prev_action:
             encoded_state.append(
-                F.one_hot(obs["prev_actions"], self.num_actions).view(T * B, -1)
+                F.one_hot(inputs["prev_actions"], self.num_actions).view(T * B, -1)
             )
+
         encoded_state = torch.cat(encoded_state, dim=1)
         core_output, new_state = self.rnn(encoded_state.view(B, T, -1), state)
-        # policy
-        logits = self.policy(core_output)
-        vf = self.vf(core_output).squeeze(-1)
+        vf = self.vf(core_output)
+        qf = self.qf(core_output)
 
-        if actions is not None:
-            # state action value function
-            core_output_actions = torch.cat([
-                core_output, F.one_hot(actions, self.num_actions)
-            ], dim=-1)
-            q1 = self.qf1(core_output_actions).squeeze(-1)
-            q2 = self.qf2(core_output_actions).squeeze(-1)
-
-            return logits, vf, q1, q2, new_state
-
-        return logits, vf, None, None, new_state
+        return (qf, vf), new_state
 
     @torch.no_grad()
     def vec_act(self, obs, state=None, device="cpu"):
@@ -189,8 +192,8 @@ class Critic(nn.Module):
             "screen_image": torch.tensor(obs["screen_image"][:, None], device=device),
             "prev_actions": torch.tensor(obs["prev_actions"][:, None], dtype=torch.long, device=device)
         }
-        logits, *_, new_state = self(inputs, state=state, policy_only=True)
-        actions = torch.argmax(logits.squeeze(1), dim=-1)
+        (q_values, _), new_state = self(inputs, state)
+        actions = torch.argmax(q_values.squeeze(1), dim=-1)
         return actions.cpu().numpy(), new_state
 
 
@@ -207,38 +210,31 @@ def iql_loss(
         next_rnn_states: LSTM_HIDDEN,
         gamma: float,
         expectile_tau: float,
-        temperature: float
 ):
+    # TODO: should we use separate hidden's for the target and current critic?
     # state value function loss
     with torch.no_grad():
-        _, _, target_q1, target_q2, new_target_rnn_states = target_critic(obs, actions=actions.long(), state=target_rnn_states)
-        target_q = torch.minimum(target_q1, target_q2)
+        (target_q, _), new_target_rnn_states = target_critic(obs, state=target_rnn_states)
 
-    logits, v_pred, q1_pred, q2_pred, new_rnn_states = critic(obs, actions=actions.long(), state=rnn_states)
-    assert target_q.shape == v_pred.shape
-    advantage = target_q - v_pred
-
-    value_loss = asymmetric_l2_loss(advantage, expectile_tau)
+    (q_pred, v_pred), new_rnn_states = critic(obs, state=rnn_states)
+    value_loss = asymmetric_l2_loss(target_q - v_pred, expectile_tau)
 
     # state action value function loss
     with torch.no_grad():
-        _, next_v, _, _, new_next_rnn_states = critic(next_obs, state=next_rnn_states)
-        next_q = rewards + (1 - dones) * gamma * next_v
+        (_, next_v), new_next_rnn_states = critic(next_obs, state=next_rnn_states)
+        # (_, next_v), new_next_rnn_states = target_critic(next_obs, state=next_rnn_states)
 
-    assert q1_pred.shape == q2_pred.shape == next_q.shape
-    td_loss = (F.mse_loss(q1_pred, next_q) + F.mse_loss(q2_pred, next_q)) / 2
+    next_q = rewards + (1 - dones) * gamma * next_v.squeeze(-1)
 
-    # actor loss
-    weights = torch.exp(temperature * advantage.clamp(max=100.0))
-    log_probs = torch.distributions.Categorical(logits=logits).log_prob(actions)
+    assert actions.dim() == 2
+    q_pred_actions = q_pred.gather(-1, actions.to(torch.long).unsqueeze(-1)).squeeze()
+    assert q_pred_actions.shape == next_q.shape
+    td_loss = F.mse_loss(q_pred_actions, next_q)
 
-    actor_loss = torch.mean(-log_probs * weights.detach())
-
-    loss = value_loss + td_loss + actor_loss
+    loss = value_loss + td_loss
     loss_info = {
         "td_loss": td_loss.item(),
         "value_loss": value_loss.item(),
-        "actor_loss": actor_loss.item(),
         "loss": loss,
         "next_v": next_v.mean().item(),
         "q_target":  next_q.mean().item()
@@ -441,7 +437,6 @@ def train(config: TrainConfig):
                     target_rnn_states=target_rnn_state,
                     next_rnn_states=next_rnn_state,
                     expectile_tau=config.expectile_tau,
-                    temperature=config.temperature,
                     gamma=config.gamma
                 )
                 # detaching rnn hidden states for the next iteration

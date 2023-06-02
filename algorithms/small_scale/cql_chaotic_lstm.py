@@ -17,6 +17,7 @@ import numpy as np
 from copy import deepcopy
 from typing import Optional, Dict, Tuple, Any
 
+from multiprocessing import set_start_method
 from katakomba.env import NetHackChallenge, OfflineNetHackChallengeWrapper
 from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
@@ -458,4 +459,5 @@ def train(config: TrainConfig):
 
 
 if __name__ == "__main__":
+    set_start_method("spawn")
     train()

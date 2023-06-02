@@ -36,8 +36,8 @@ class TrainConfig:
     data_mode: str = "compressed"
     # Wandb logging
     project: str = "NetHack"
-    group: str = "small_scale_iql"
-    name: str = "iql"
+    group: str = "small_scale_awac"
+    name: str = "awac"
     version: int = 0
     # Model
     rnn_hidden_dim: int = 2048
@@ -47,7 +47,6 @@ class TrainConfig:
     clip_range: float = 10.0
     tau: float = 0.005
     gamma: float = 0.999
-    expectile_tau: float = 0.8
     temperature: float = 1.0
     # Training
     update_steps: int = 500_000
@@ -100,11 +99,7 @@ def soft_update(target, source, tau):
         tp.data.copy_((1 - tau) * tp.data + tau * sp.data)
 
 
-def asymmetric_l2_loss(u: torch.Tensor, tau: float) -> torch.Tensor:
-    return torch.mean(torch.abs(tau - (u < 0).float()) * u ** 2)
-
-
-class Critic(nn.Module):
+class ActorCritic(nn.Module):
     def __init__(self, action_dim, rnn_hidden_dim=512, rnn_layers=1, rnn_dropout=0.0, use_prev_action=True):
         super().__init__()
         self.num_actions = action_dim
@@ -134,18 +129,14 @@ class Critic(nn.Module):
             dropout=rnn_dropout,
             batch_first=True
         )
-        # in similar style to original:
-        # https://github.com/dungeonsdatasubmission/dungeonsdata-neurips2022/blob/ee72d6aac9df00a4a6ab1f501db37a632a75b952/experiment_code/hackrl/models/offline_chaotic_dwarf.py#L538
-        self.qf1 = nn.Linear(rnn_hidden_dim + self.num_actions, 1)
-        self.qf2 = nn.Linear(rnn_hidden_dim + self.num_actions, 1)
-        self.vf = nn.Linear(rnn_hidden_dim, 1)
+        self.qf = nn.Linear(rnn_hidden_dim, self.num_actions)
         self.policy = nn.Linear(rnn_hidden_dim, self.num_actions)
 
-    def forward(self, obs, state=None, actions=None):
+    def forward(self, inputs, state=None):
         # [batch_size, seq_len, ...]
-        B, T, C, H, W = obs["screen_image"].shape
-        topline = obs["tty_chars"][..., 0, :]
-        bottom_line = obs["tty_chars"][..., -2:, :]
+        B, T, C, H, W = inputs["screen_image"].shape
+        topline = inputs["tty_chars"][..., 0, :]
+        bottom_line = inputs["tty_chars"][..., -2:, :]
 
         encoded_state = [
             self.topline_encoder(
@@ -155,32 +146,22 @@ class Critic(nn.Module):
                 bottom_line.float(memory_format=torch.contiguous_format).view(T * B, -1)
             ),
             self.screen_encoder(
-                obs["screen_image"]
+                inputs["screen_image"]
                 .float(memory_format=torch.contiguous_format)
                 .view(T * B, C, H, W)
             ),
         ]
         if self.use_prev_action:
             encoded_state.append(
-                F.one_hot(obs["prev_actions"], self.num_actions).view(T * B, -1)
+                F.one_hot(inputs["prev_actions"], self.num_actions).view(T * B, -1)
             )
+
         encoded_state = torch.cat(encoded_state, dim=1)
         core_output, new_state = self.rnn(encoded_state.view(B, T, -1), state)
-        # policy
+        qf = self.qf(core_output)
         logits = self.policy(core_output)
-        vf = self.vf(core_output).squeeze(-1)
 
-        if actions is not None:
-            # state action value function
-            core_output_actions = torch.cat([
-                core_output, F.one_hot(actions, self.num_actions)
-            ], dim=-1)
-            q1 = self.qf1(core_output_actions).squeeze(-1)
-            q2 = self.qf2(core_output_actions).squeeze(-1)
-
-            return logits, vf, q1, q2, new_state
-
-        return logits, vf, None, None, new_state
+        return (qf, logits), new_state
 
     @torch.no_grad()
     def vec_act(self, obs, state=None, device="cpu"):
@@ -189,14 +170,14 @@ class Critic(nn.Module):
             "screen_image": torch.tensor(obs["screen_image"][:, None], device=device),
             "prev_actions": torch.tensor(obs["prev_actions"][:, None], dtype=torch.long, device=device)
         }
-        logits, *_, new_state = self(inputs, state=state, policy_only=True)
+        (_, logits), new_state = self(inputs, state)
         actions = torch.argmax(logits.squeeze(1), dim=-1)
         return actions.cpu().numpy(), new_state
 
 
-def iql_loss(
-        critic: Critic,
-        target_critic: Critic,
+def awac_loss(
+        model: ActorCritic,
+        target_model: ActorCritic,
         obs: Dict[str, torch.Tensor],
         next_obs: Dict[str, torch.Tensor],
         actions: torch.Tensor,
@@ -204,46 +185,40 @@ def iql_loss(
         dones: torch.Tensor,
         rnn_states: LSTM_HIDDEN,
         target_rnn_states: LSTM_HIDDEN,
-        next_rnn_states: LSTM_HIDDEN,
         gamma: float,
-        expectile_tau: float,
         temperature: float
 ):
-    # state value function loss
+    # critic loss
     with torch.no_grad():
-        _, _, target_q1, target_q2, new_target_rnn_states = target_critic(obs, actions=actions.long(), state=target_rnn_states)
-        target_q = torch.minimum(target_q1, target_q2)
+        (next_q, next_logits), new_target_rnn_states = target_model(next_obs, state=target_rnn_states)
+        next_actions = torch.distributions.Categorical(logits=next_logits).sample()
+        next_q_actions = next_q.gather(-1, next_actions.to(torch.long).unsqueeze(-1)).squeeze()
 
-    logits, v_pred, q1_pred, q2_pred, new_rnn_states = critic(obs, actions=actions.long(), state=rnn_states)
-    assert target_q.shape == v_pred.shape
-    advantage = target_q - v_pred
+        assert rewards.shape == dones.shape == next_q_actions.shape
+        target_q = rewards + (1 - dones) * gamma * next_q_actions
 
-    value_loss = asymmetric_l2_loss(advantage, expectile_tau)
-
-    # state action value function loss
-    with torch.no_grad():
-        _, next_v, _, _, new_next_rnn_states = critic(next_obs, state=next_rnn_states)
-        next_q = rewards + (1 - dones) * gamma * next_v
-
-    assert q1_pred.shape == q2_pred.shape == next_q.shape
-    td_loss = (F.mse_loss(q1_pred, next_q) + F.mse_loss(q2_pred, next_q)) / 2
+    assert actions.dim() == 2
+    (q_pred, logits_pred), new_rnn_states = model(obs, state=rnn_states)
+    q_pred_actions = q_pred.gather(-1, actions.to(torch.long).unsqueeze(-1)).squeeze()
+    assert q_pred_actions.shape == target_q.shape
+    td_loss = F.mse_loss(q_pred_actions, target_q)
 
     # actor loss
-    weights = torch.exp(temperature * advantage.clamp(max=100.0))
-    log_probs = torch.distributions.Categorical(logits=logits).log_prob(actions)
+    with torch.no_grad():
+        adv = q_pred_actions - (q_pred * F.softmax(logits_pred, dim=-1)).sum(-1)
 
-    actor_loss = torch.mean(-log_probs * weights.detach())
+    log_probs = torch.distributions.Categorical(logits=logits_pred).log_prob(actions)
+    weights = torch.exp(temperature * adv).clamp(max=100.0)
+    actor_loss = torch.mean(-log_probs * weights)
 
-    loss = value_loss + td_loss + actor_loss
+    loss = td_loss + actor_loss
     loss_info = {
         "td_loss": td_loss.item(),
-        "value_loss": value_loss.item(),
         "actor_loss": actor_loss.item(),
         "loss": loss,
-        "next_v": next_v.mean().item(),
         "q_target":  next_q.mean().item()
     }
-    return loss, new_rnn_states, new_target_rnn_states, new_next_rnn_states, loss_info
+    return loss, new_rnn_states, new_target_rnn_states, loss_info
 
 
 @torch.no_grad()
@@ -361,7 +336,7 @@ def train(config: TrainConfig):
     )
     tp = ThreadPoolExecutor(max_workers=14)
 
-    critic = Critic(
+    model = ActorCritic(
         action_dim=eval_env.single_action_space.n,
         use_prev_action=config.use_prev_action,
         rnn_hidden_dim=config.rnn_hidden_dim,
@@ -369,17 +344,17 @@ def train(config: TrainConfig):
         rnn_dropout=config.rnn_dropout,
     ).to(DEVICE)
     with torch.no_grad():
-        target_critic = deepcopy(critic)
+        target_model = deepcopy(model)
 
-    no_decay_params, decay_params = filter_wd_params(critic)
+    no_decay_params, decay_params = filter_wd_params(model)
     optim = torch.optim.AdamW([
         {"params": no_decay_params, "weight_decay": 0.0},
         {"params": decay_params, "weight_decay": config.weight_decay}
     ], lr=config.learning_rate)
-    print("Number of parameters:", sum(p.numel() for p in critic.parameters()))
+    print("Number of parameters:", sum(p.numel() for p in model.parameters()))
 
     scaler = torch.cuda.amp.GradScaler()
-    rnn_state, target_rnn_state, next_rnn_state = None, None, None
+    rnn_state, target_rnn_state = None, None
     prev_actions = torch.zeros((config.batch_size, 1), dtype=torch.long, device=DEVICE)
 
     # For reward normalization
@@ -429,9 +404,9 @@ def train(config: TrainConfig):
                     "tty_chars": batch["tty_chars"][:, 1:].contiguous(),
                     "prev_actions": batch["actions"][:, :-1].long()
                 }
-                loss, rnn_state, target_rnn_state, next_rnn_state, loss_info = iql_loss(
-                    critic=critic,
-                    target_critic=target_critic,
+                loss, rnn_state, target_rnn_state, loss_info = awac_loss(
+                    model=model,
+                    target_model=target_model,
                     obs=obs,
                     next_obs=next_obs,
                     actions=batch["actions"][:, :-1],
@@ -439,15 +414,12 @@ def train(config: TrainConfig):
                     dones=batch["dones"][:, :-1],
                     rnn_states=rnn_state,
                     target_rnn_states=target_rnn_state,
-                    next_rnn_states=next_rnn_state,
-                    expectile_tau=config.expectile_tau,
                     temperature=config.temperature,
                     gamma=config.gamma
                 )
                 # detaching rnn hidden states for the next iteration
                 rnn_state = [a.detach() for a in rnn_state]
                 target_rnn_state = [a.detach() for a in target_rnn_state]
-                next_rnn_state = [a.detach() for a in next_rnn_state]
 
                 # update prev_actions for next iteration (-1 is seq_len + 1, so -2)
                 prev_actions = batch["actions"][:, -2].unsqueeze(-1)
@@ -458,11 +430,11 @@ def train(config: TrainConfig):
             scaler.scale(loss).backward()
             if config.clip_grad_norm is not None:
                 scaler.unscale_(optim)
-                torch.nn.utils.clip_grad_norm_(critic.parameters(), config.clip_grad_norm)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.clip_grad_norm)
             scaler.step(optim)
             scaler.update()
             optim.zero_grad(set_to_none=True)
-            soft_update(target_critic, critic, tau=config.tau)
+            soft_update(target_model, model, tau=config.tau)
 
         wandb.log({"times/backward_pass": timer.elapsed_time_gpu}, step=step)
         wandb.log({"transitions": config.batch_size * config.seq_len * step, **loss_info}, step=step)
@@ -470,7 +442,7 @@ def train(config: TrainConfig):
         if step % config.eval_every == 0:
             with Timeit() as timer:
                 eval_stats = vec_evaluate(
-                    eval_env, critic, config.eval_episodes, config.eval_seed, device=DEVICE
+                    eval_env, model, config.eval_episodes, config.eval_seed, device=DEVICE
                 )
             raw_returns = eval_stats.pop("reward_raw")
             raw_depths = eval_stats.pop("depth_raw")
@@ -483,7 +455,7 @@ def train(config: TrainConfig):
             wandb.log({"transitions": config.batch_size * config.seq_len * step, **eval_stats}, step=step)
 
             if config.checkpoints_path is not None:
-                torch.save(critic.state_dict(), os.path.join(config.checkpoints_path, f"{step}.pt"))
+                torch.save(model.state_dict(), os.path.join(config.checkpoints_path, f"{step}.pt"))
                 # saving raw logs
                 np.save(os.path.join(config.checkpoints_path, f"{step}_returns.npy"), raw_returns)
                 np.save(os.path.join(config.checkpoints_path, f"{step}_depths.npy"), raw_depths)

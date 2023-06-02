@@ -17,6 +17,7 @@ import numpy as np
 from copy import deepcopy
 from typing import Optional, Dict, Tuple, Any
 
+from multiprocessing import set_start_method
 from katakomba.env import NetHackChallenge, OfflineNetHackChallengeWrapper
 from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
@@ -103,7 +104,7 @@ def sample_convex_combination(size, device="cpu"):
     weights = torch.rand(size, device=device)
     weights = weights / weights.sum()
     assert torch.isclose(weights.sum(), torch.tensor([1.0], device=device))
-    return weights
+    return weights.view(1, 1, -1, 1)
 
 
 class Critic(nn.Module):
@@ -173,6 +174,7 @@ class Critic(nn.Module):
             "prev_actions": torch.tensor(obs["prev_actions"][:, None], dtype=torch.long, device=device)
         }
         q_values_ensemble, new_state = self(inputs, state)
+        # [batch_size, seq_len, num_heads, num_actions]
         q_values = q_values_ensemble.mean(2)
         assert q_values.dim() == 3
 
@@ -400,7 +402,6 @@ def train(config: TrainConfig):
                     "prev_actions": batch["actions"][:, :-1].long()
                 }
 
-                convex_comb_weights = sample_convex_combination(config.num_heads, device=DEVICE).view(1, 1, -1, 1)
                 loss, rnn_state, target_rnn_state, loss_info = rem_loss(
                     critic=critic,
                     target_critic=target_critic,
@@ -411,7 +412,7 @@ def train(config: TrainConfig):
                     dones=batch["dones"][:, :-1],
                     rnn_states=rnn_state,
                     target_rnn_states=target_rnn_state,
-                    convex_comb_weights=convex_comb_weights,
+                    convex_comb_weights=sample_convex_combination(config.num_heads, device=DEVICE),
                     gamma=config.gamma
                 )
                 rnn_state = [a.detach() for a in rnn_state]
@@ -436,6 +437,7 @@ def train(config: TrainConfig):
 
         if step % config.eval_every == 0:
             with Timeit() as timer:
+
                 eval_stats = vec_evaluate(
                     eval_env, critic, config.eval_episodes, config.eval_seed, device=DEVICE
                 )
@@ -465,4 +467,5 @@ def train(config: TrainConfig):
 
 
 if __name__ == "__main__":
+    set_start_method("spawn")
     train()

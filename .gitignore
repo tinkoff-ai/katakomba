@@ -6,6 +6,7 @@ data
 ttyrecs.db
 
 # Misc
+algorithms/small_scale/iql_chaotic_lstm_discrete.py
 run.sh
 test.py
 test.ipynb

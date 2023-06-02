@@ -11,12 +11,13 @@ CACHE_PATH = os.environ.get('KATAKOMBA_CACHE_DIR', os.path.expanduser('~/.katako
 
 
 def _flush_to_memmap(filename: str, array: np.ndarray):
-    if os.path.exists(filename):
-        mmap = np.load(filename, mmap_mode="r")
-    else:
-        mmap = np.memmap(filename, mode="w+", dtype=array.dtype, shape=array.shape)
-        mmap[:] = array
-        mmap.flush()
+    # disabled for now, can cause issues on the cluster with multiple jobs on same node
+    # if os.path.exists(filename):
+    #     mmap = np.load(filename, mmap_mode="r")
+    # else:
+    mmap = np.memmap(filename, mode="w+", dtype=array.dtype, shape=array.shape)
+    mmap[:] = array
+    mmap.flush()
 
     return mmap
 

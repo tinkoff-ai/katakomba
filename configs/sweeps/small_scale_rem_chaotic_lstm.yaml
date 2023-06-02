@@ -1,0 +1,71 @@
+entity: tlab
+project: NetHack
+program: algorithms/small_scale/rem_chaotic_lstm.py
+method: grid
+parameters:
+  group:
+    value: "small_scale_rem_chaotic_lstm_multiseed"
+  version:
+    value: 0
+  data_mode:
+    value: "memmap"
+  character:
+    values: [
+      "arc-hum-law",
+      "arc-hum-neu",
+      "arc-dwa-law",
+      "arc-gno-neu",
+
+      "bar-hum-neu",
+      "bar-hum-cha",
+      "bar-orc-cha",
+
+      "cav-hum-law",
+      "cav-hum-neu",
+      "cav-dwa-law",
+      "cav-gno-neu",
+
+      "hea-hum-neu",
+      "hea-gno-neu",
+
+      "kni-hum-law",
+
+      "mon-hum-neu",
+      "mon-hum-law",
+      "mon-hum-cha",
+
+      "pri-hum-neu",
+      "pri-hum-law",
+      "pri-hum-cha",
+      "pri-elf-cha",
+
+      "ran-hum-neu",
+      "ran-hum-cha",
+      "ran-elf-cha",
+      "ran-gno-neu",
+      "ran-orc-cha",
+
+      "rog-hum-cha",
+      "rog-orc-cha",
+
+      "sam-hum-law",
+
+      "tou-hum-neu",
+
+      "val-hum-neu",
+      "val-hum-law",
+      "val-dwa-law",
+
+      "wiz-hum-neu",
+      "wiz-hum-cha",
+      "wiz-elf-cha",
+      "wiz-gno-neu",
+      "wiz-orc-cha",
+  ]
+  train_seed:
+    values: [0, 1, 2]
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - ${args}
