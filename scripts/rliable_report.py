@@ -1,101 +1,72 @@
-import os
-import wandb
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+import pickle
 import pyrallis
-from typing import Optional
 from dataclasses import dataclass
-from tqdm.auto import tqdm
 from itertools import product
 from rliable import library as rly
 from rliable import metrics
 from rliable import plot_utils
 
-from katakomba.utils.roles import ALLOWED_COMBOS
-from katakomba.utils.datasets.small_scale import load_nld_aa_small_dataset
-from katakomba.utils.scores import MEAN_SCORES_AUTOASCEND
-
+from katakomba.utils.roles import Role, Race, Alignment
+from katakomba.utils.roles import (
+    ALLOWED_COMBOS, BASE_COMBOS, EXTENDED_COMBOS, COMPLETE_COMBOS
+)
 
 @dataclass
 class Config:
-    bc_wandb_group: Optional[str] = "small_scale_bc_chaotic_lstm_multiseed-v0"
-    cql_wandb_group: Optional[str] = None
-    iql_wandb_group: Optional[str] = None
+    scores_path: str = "cached_algo_stats.pkl"
     metric_name: str = "normalized_scores"  # normalized_scores | returns | depths
-    checkpoint: int = 500000
-
-
-def get_scores(runs, character, filename):
-    multiseed_scores = []
-
-    runs = [run for run in runs if run.config["character"] == character]
-    for run in runs:
-        run.file(filename).download(replace=True)
-        multiseed_scores.append(np.load(filename))
-
-    os.remove(filename)
-    return np.array(multiseed_scores)
-
-
-def get_autoascend_scores(metric_name):
-    characters_metrics = []
-    for role, race, align in ALLOWED_COMBOS:
-        df, traj = load_nld_aa_small_dataset(role=role, race=race, align=align, mode="compressed")
-        if metric_name == "returns":
-            metric = np.array([df[gameid].attrs["points"] for gameid in list(traj.keys())])
-        elif metric_name == "normalized_scores":
-            metric = np.array([df[gameid].attrs["points"] for gameid in list(traj.keys())])
-            metric = metric / MEAN_SCORES_AUTOASCEND[(role, race, align)]
-        elif metric_name == "depths":
-            metric = np.array([df[gameid].attrs["maxlvl"] for gameid in list(traj.keys())])
-        else:
-            raise RuntimeError("Unknown metric!")
-
-        characters_metrics.append(metric.mean())
-        df.close()
-
-    return np.array(characters_metrics)[None, :]
+    setting: str = "full"
 
 
 @pyrallis.wrap()
 def main(config: Config):
-    algo_groups = {
-        "BC": config.bc_wandb_group,
-        "IQL": config.iql_wandb_group,
-        "CQL": config.cql_wandb_group
+    setting_combos = {
+        "full": ALLOWED_COMBOS,
+        "base": BASE_COMBOS,
+        "extended": EXTENDED_COMBOS,
+        "complete": COMPLETE_COMBOS,
     }
-    filename = f"{config.checkpoint}_{config.metric_name}.npy"
+
+    with open(config.scores_path, "rb") as f:
+        cached_stats = pickle.load(f)
+
+        algorithms_scores = {}
+        for algo in cached_stats:
+            all_metrics = []
+            for character in cached_stats[algo]:
+                role, race, align = character.split("-")
+                role, race, align = Role(role), Race(race), Alignment(align)
+
+                if (role, race, align) not in setting_combos[config.setting]:
+                    continue
+
+                character_metrics = cached_stats[algo][character][config.metric_name].ravel()
+                if algo == "AUTOASCEND":
+                    # sample min trajectories, to align shapes
+                    np.random.seed(32)
+                    character_metrics = np.random.choice(character_metrics, size=675, replace=False)
+
+                all_metrics.append(character_metrics)
+
+            algorithms_scores[algo] = np.stack(all_metrics, axis=0).T
+
+        # exclude it for now
+        algorithms_scores.pop("AUTOASCEND")
+
     xlabels = {
         "normalized_scores": "Normalized Score",
         "returns": "Score",
-        "depths": "Depth"
+        "depths": "Death Level"
     }
     metrics_thresholds = {
         "normalized_scores": 1.0,
         "returns": 5000,
         "depths": 5
     }
-
-    api = wandb.Api()
-    algorithms_scores = {
-        "AUTOASCEND": get_autoascend_scores(config.metric_name)
-    }
-    for algo, group in tqdm(algo_groups.items(), desc="Downloading algorithms scores"):
-        if group is None:
-            continue
-
-        algo_runs = [run for run in api.runs("tlab/Nethack") if run.group == group]
-
-        characters_scores = []
-        for role, race, align in tqdm(ALLOWED_COMBOS, desc="Downloading character scores", leave=False):
-            character = f"{role.value}-{race.value}-{align.value}"
-            characters_scores.append(
-                get_scores(algo_runs, character=character, filename=filename).mean(-1)
-            )
-        algorithms_scores[algo] = np.array(characters_scores).T
-
     # plotting aggregate metrics with 95% stratified bootstrap CIs
     aggregate_func = lambda x: np.array([
         metrics.aggregate_median(x),
@@ -104,7 +75,7 @@ def main(config: Config):
         metrics.aggregate_optimality_gap(x)
     ])
     aggregate_scores, aggregate_score_cis = rly.get_interval_estimates(
-        algorithms_scores, aggregate_func, reps=50000
+        algorithms_scores, aggregate_func, reps=10000
     )
     fig, axes = plot_utils.plot_interval_estimates(
         aggregate_scores, aggregate_score_cis,
@@ -113,7 +84,7 @@ def main(config: Config):
         xlabel=xlabels[config.metric_name],
         xlabel_y_coordinate=-1.0,
     )
-    plt.savefig("reliable_metrics.png", bbox_inches="tight")
+    plt.savefig(f"reliable_metrics_{config.metric_name}.pdf", bbox_inches="tight", format="pdf")
 
     # plotting performance profiles
     thresholds = np.linspace(0.0, metrics_thresholds[config.metric_name], 64)
@@ -131,7 +102,7 @@ def main(config: Config):
       ax=ax
     )
     plt.legend()
-    plt.savefig("reliable_performance_profile.png", bbox_inches="tight")
+    plt.savefig(f"reliable_performance_profile_{config.metric_name}.pdf", bbox_inches="tight", format="pdf")
 
     # plotting probability of improvement
     paired_scores = {}
@@ -143,10 +114,10 @@ def main(config: Config):
             )
 
     average_probabilities, average_prob_cis = rly.get_interval_estimates(
-        paired_scores, metrics.probability_of_improvement, reps=2000
+        paired_scores, metrics.probability_of_improvement, reps=500
     )
     plot_utils.plot_probability_of_improvement(average_probabilities, average_prob_cis)
-    plt.savefig("reliable_probability_of_improvement.png", bbox_inches="tight")
+    plt.savefig(f"reliable_probability_of_improvement_{config.metric_name}.pdf", bbox_inches="tight", format="pdf")
 
 
 if __name__ == "__main__":

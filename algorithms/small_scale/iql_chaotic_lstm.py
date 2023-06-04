@@ -17,6 +17,7 @@ import numpy as np
 from copy import deepcopy
 from typing import Optional, Dict, Tuple, Any
 
+from multiprocessing import set_start_method
 from katakomba.env import NetHackChallenge, OfflineNetHackChallengeWrapper
 from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, ScreenEncoder
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
@@ -189,7 +190,7 @@ class Critic(nn.Module):
             "screen_image": torch.tensor(obs["screen_image"][:, None], device=device),
             "prev_actions": torch.tensor(obs["prev_actions"][:, None], dtype=torch.long, device=device)
         }
-        logits, *_, new_state = self(inputs, state=state, policy_only=True)
+        logits, *_, new_state = self(inputs, state=state)
         actions = torch.argmax(logits.squeeze(1), dim=-1)
         return actions.cpu().numpy(), new_state
 
@@ -498,5 +499,6 @@ def train(config: TrainConfig):
 
 
 if __name__ == "__main__":
+    set_start_method("spawn")
     train()
 
