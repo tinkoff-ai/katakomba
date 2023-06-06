@@ -1,4 +1,4 @@
-![Katakomba: Tools and Benchmarks for Data-Driven NetHack](logo.jpeg)
+![Katakomba: Tools and Benchmarks for Data-Driven NetHack](katakomba.png)
 
 # How to install render utils?
 
