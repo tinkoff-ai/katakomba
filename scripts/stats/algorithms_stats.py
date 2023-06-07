@@ -17,9 +17,9 @@ from katakomba.utils.scores import MEAN_SCORES_AUTOASCEND
 class Config:
     bc_wandb_group: Optional[str] = "small_scale_bc_chaotic_lstm_multiseed-v0"
     cql_wandb_group: Optional[str] = "small_scale_cql_chaotic_lstm_multiseed-v0"
-    awac_wandb_group: Optional[str] = None
-    iql_wandb_group: Optional[str] = None
-    rem_wandb_group: Optional[str] = None
+    awac_wandb_group: Optional[str] = "small_scale_awac_chaotic_lstm_multiseed-v0"
+    iql_wandb_group: Optional[str] = "small_scale_iql_chaotic_lstm_multiseed-v0"
+    rem_wandb_group: Optional[str] = "small_scale_rem_chaotic_lstm_multiseed-v0"
     checkpoint: int = 500000
     cache_path: str = "cached_algo_stats.pkl"
 
@@ -59,9 +59,9 @@ def main(config: Config):
     algo_groups = {
         "BC": config.bc_wandb_group,
         "CQL": config.cql_wandb_group,
-        # "AWAC": config.awac_wandb_group,
-        # "REM": config.rem_wandb_group,
-        # "IQL": config.iql_wandb_group,
+        "AWAC": config.awac_wandb_group,
+        "IQL": config.iql_wandb_group,
+        "REM": config.rem_wandb_group,
     }
 
     if not os.path.exists(config.cache_path):
@@ -82,10 +82,6 @@ def main(config: Config):
 
         with open(config.cache_path, "wb") as f:
             pickle.dump(algorithms_scores, f)
-    else:
-        with open(config.cache_path, "rb") as f:
-            algorithms_scores = pickle.load(f)
-            algorithms_scores.pop("AUTOASCEND")
 
 
 if __name__ == "__main__":
