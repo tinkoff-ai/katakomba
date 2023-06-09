@@ -18,7 +18,7 @@ docker run --gpus=all -it --rm --name <container_name> <image_name>
 
 2. ```pip install -e .```
 
-# Baselines
+## Baselines
 
 | Algorithm                                                                                                                       | Variants Implemented                               | Wandb Report |
 |---------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------| ----------- |
