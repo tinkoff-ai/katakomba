@@ -1,6 +1,6 @@
 ![Katakomba: Tools and Benchmarks for Data-Driven NetHack](katakomba.png)
 
-**Katakomba** is an open-source benchmark for data-driven NetHack. At the moment, it provides a set of standardized datasets with familiar interfaces and offline RL baselines augmented with recurrence with corresponding logs synced to the Weights&Biases.
+<p align="center"><b>Katakomba</b> is an open-source benchmark for data-driven NetHack. At the moment, it provides a set of standardized datasets with familiar interfaces and offline RL baselines augmented with recurrence with corresponding logs synced to the Weights&Biases.</p>
 
 ## Getting started
 TO BE DONE
