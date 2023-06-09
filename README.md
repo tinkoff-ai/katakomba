@@ -1,8 +1,18 @@
 ![Katakomba: Tools and Benchmarks for Data-Driven NetHack](katakomba.png)
 
-# Installation
+**Katakomba** is an open-source benchmark for data-driven NetHack. At the moment, it provides a set of standardized datasets with familiar interfaces and offline RL baselines augmented with recurrence.
 
-TBD
+## Getting started
+TO BE DONE
+
+```bash
+git clone https://github.com/tinkoff-ai/katakomba.git && cd katakomba
+pip install -r requirements/requirements_dev.txt
+
+# alternatively, you could use docker
+docker build -t <image_name> .
+docker run --gpus=all -it --rm --name <container_name> <image_name>
+```
 
 1. ```cd katakomba/utils/render_utils/```
 
@@ -17,3 +27,8 @@ TBD
 | ✅ [Accelerating Online Reinforcement Learning with Offline Datasets <br>(AWAC)](https://arxiv.org/abs/2006.09359)               | [`awac_chaotic_lstm.py`](algorithms/small_scale/awac_chaotic_lstm.py)                    | [`Katakomba-All`]()
 | ✅ [Offline Reinforcement Learning with Implicit Q-Learning <br>(IQL)](https://arxiv.org/abs/2110.06169)                         | [`iql_chaotic_lstm.py`](algorithms/small_scale/iql_chaotic_lstm.py)                      | [`Katakomba-All`]()
 | ✅ [An Optimistic Perspective on Offline Reinforcement Learning <br>(REM)](https://arxiv.org/abs/1907.04543)                     | [`rem_chaotic_lstm.py`](algorithms/small_scale/rem_chaotic_lstm.py)                      | [`Katakomba-All`]()
+
+## Citing Katakamoba
+```bibtex
+
+```
