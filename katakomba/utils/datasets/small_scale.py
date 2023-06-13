@@ -3,21 +3,41 @@ import h5py
 import shutil
 import numpy as np
 
-from katakomba.utils.roles import Role, Race, Alignment
+import urllib
+from typing import Optional
+from katakomba.utils.roles import Role, Race, Alignment, ALLOWED_COMBOS
 from tqdm.auto import tqdm
 
+BASE_REPO_ID = os.environ.get('KATAKOMBA_REPO_ID', os.path.expanduser('Howuhh/katakomba'))
 DATA_PATH = os.environ.get('KATAKOMBA_DATA_DIR', os.path.expanduser('~/.katakomba/datasets'))
 CACHE_PATH = os.environ.get('KATAKOMBA_CACHE_DIR', os.path.expanduser('~/.katakomba/cache'))
 
 
+# similar to huggingface_hub function hf_hub_url
+def download_dataset(
+        repo_id: str,
+        filename: str,
+        subfolder: Optional[str] = None
+):
+    dataset_path = os.path.join(DATA_PATH, filename)
+    if subfolder is not None:
+        filename = f"{subfolder}/{filename}"
+    dataset_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{filename}"
+
+    print(f"Downloading dataset: {dataset_url} to {DATA_PATH}")
+    urllib.request.urlretrieve(dataset_url, dataset_path)
+
+    if not os.path.exists(os.path.join(filename.split("/")[-1], DATA_PATH)):
+        raise IOError(f"Failed to download dataset from {dataset_url}")
+
+
 def _flush_to_memmap(filename: str, array: np.ndarray):
-    # disabled for now, can cause issues on the cluster with multiple jobs on same node
-    # if os.path.exists(filename):
-    #     mmap = np.load(filename, mmap_mode="r")
-    # else:
-    mmap = np.memmap(filename, mode="w+", dtype=array.dtype, shape=array.shape)
-    mmap[:] = array
-    mmap.flush()
+    if os.path.exists(filename):
+        mmap = np.load(filename, mmap_mode="r")
+    else:
+        mmap = np.memmap(filename, mode="w+", dtype=array.dtype, shape=array.shape)
+        mmap[:] = array
+        mmap.flush()
 
     return mmap
 
@@ -28,13 +48,20 @@ def load_nld_aa_small_dataset(
         align: Alignment,
         mode="in_memory"
 ):
+    os.makedirs(DATA_PATH, exist_ok=True)
+    if (role, race, align) not in ALLOWED_COMBOS:
+        raise RuntimeError(
+            "Invalid character combination! "
+            "Please see all allowed combos in the katakomba/utils/roles.py"
+        )
     dataset_name = f"data-{role.value}-{race.value}-{align.value}-any.hdf5"
-    # TODO: check if exists and download dataset first, for now just loading from the path
-    # for now just checking for existence
     if not os.path.exists(os.path.join(DATA_PATH, dataset_name)):
-        raise RuntimeError("There is no dataset for such a character.")
+        download_dataset(
+            repo_id=BASE_REPO_ID,
+            subfolder="data",
+            filename=dataset_name,
+        )
 
-    # os.makedirs(DATA_PATH, exist_ok=True)
     dataset_path = os.path.join(DATA_PATH, dataset_name)
     df = h5py.File(dataset_path, "r")
 
