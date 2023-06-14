@@ -61,6 +61,7 @@ class TrainConfig:
     eval_every: int = 10_000
     eval_episodes: int = 50
     eval_processes: int = 14
+    render_processes: int = 14
     eval_seed: int = 50
     train_seed: int = 42
 
@@ -360,7 +361,7 @@ def train(config: TrainConfig):
         seed=config.train_seed,
         add_next_step=True       # true as this is needed for next_obs
     )
-    tp = ThreadPoolExecutor(max_workers=14)
+    tp = ThreadPoolExecutor(max_workers=config.render_processes)
 
     critic = Critic(
         action_dim=eval_env.single_action_space.n,
