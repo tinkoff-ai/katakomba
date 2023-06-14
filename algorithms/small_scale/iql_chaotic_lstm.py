@@ -107,7 +107,14 @@ def asymmetric_l2_loss(u: torch.Tensor, tau: float) -> torch.Tensor:
 
 
 class Critic(nn.Module):
-    def __init__(self, action_dim, rnn_hidden_dim=512, rnn_layers=1, rnn_dropout=0.0, use_prev_action=True):
+    def __init__(
+            self,
+            action_dim: int,
+            rnn_hidden_dim: int = 512,
+            rnn_layers: int = 1,
+            rnn_dropout: float = 0.0,
+            use_prev_action: bool = True
+    ):
         super().__init__()
         self.num_actions = action_dim
         self.use_prev_action = use_prev_action
@@ -357,7 +364,6 @@ def train(config: TrainConfig):
     tmp_env = env_fn()
     eval_env = AsyncVectorEnv(
         env_fns=[env_fn for _ in range(config.eval_processes)],
-        shared_memory=True,
         copy=False
     )
     buffer = SequentialBuffer(
