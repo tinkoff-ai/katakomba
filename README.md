@@ -4,8 +4,8 @@
 
 ## Installation
 
-For now Katakomba is not pip installable. However, the installation is easy. 
-We also provide an alternative with the dockerfile that is already set up to work (this is a preferred way!).
+For now, Katakomba is not pip installable. However, the installation is easy. 
+We also provide an alternative with the Dockerfile already set up to work (this is the preferred way!).
 ```bash
 git clone https://github.com/tinkoff-ai/katakomba.git && cd katakomba
 pip install -r requirements.txt
@@ -14,7 +14,7 @@ pip install -r requirements.txt
 docker build -t katakomba .
 ```
 
-One last step is installation of additional utils used for faster rendering of `tty` observations as images:
+One last step is the installation of additional utils used for faster rendering of `tty` observations as images:
 ```bash
 # use pip3 inside the docker container
 pip install -e katakomba/utils/render_utils/
