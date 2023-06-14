@@ -7,6 +7,7 @@ import urllib
 from typing import Optional
 from katakomba.utils.roles import Role, Race, Alignment, ALLOWED_COMBOS
 from tqdm.auto import tqdm
+from typing import Tuple, List, Dict, Any
 
 BASE_REPO_ID = os.environ.get('KATAKOMBA_REPO_ID', os.path.expanduser('Howuhh/katakomba'))
 DATA_PATH = os.environ.get('KATAKOMBA_DATA_DIR', os.path.expanduser('~/.katakomba/datasets'))
@@ -31,7 +32,7 @@ def download_dataset(
         raise IOError(f"Failed to download dataset from {dataset_url}")
 
 
-def _flush_to_memmap(filename: str, array: np.ndarray):
+def _flush_to_memmap(filename: str, array: np.ndarray) -> np.ndarray:
     if os.path.exists(filename):
         mmap = np.load(filename, mmap_mode="r")
     else:
@@ -46,8 +47,8 @@ def load_nld_aa_small_dataset(
         role: Role,
         race: Race,
         align: Alignment,
-        mode="in_memory"
-):
+        mode: str = "in_memory"
+) -> Tuple[h5py.File, List[Dict[str, Any]]]:
     os.makedirs(DATA_PATH, exist_ok=True)
     if (role, race, align) not in ALLOWED_COMBOS:
         raise RuntimeError(
@@ -110,7 +111,7 @@ class NLDSmallDataset:
             role: Role,
             race: Race,
             align: Alignment,
-            mode="compressed"
+            mode: str = "compressed"
     ):
         self.hdf5_file, self.data = load_nld_aa_small_dataset(role, race, align, mode=mode)
         self.gameids = list(self.data.keys())
@@ -131,9 +132,10 @@ class NLDSmallDataset:
         gameid = self.gameids[idx]
         return dict(self.hdf5_file[gameid].attrs)
 
-    def close(self):
+    def close(self, clear_cache=True):
         self.hdf5_file.close()
-        # remove memmap files from the disk upon closing
-        if self.mode == "memmap":
+        if self.mode == "memmap" and clear_cache:
+            print("")
+            # remove memmap cache files from the disk upon closing
             cache_name = f"memmap-data-{self.role.value}-{self.race.value}-{self.align.value}-any"
             shutil.rmtree(os.path.join(CACHE_PATH, cache_name))
