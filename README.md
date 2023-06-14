@@ -38,6 +38,7 @@ env = OfflineNetHackChallengeWrapper(env)
 # - from RAM, decompressed ("in_memory"): fast but requires a lot of RAM, takes 5-10 minutes for decompression first
 # - from Disk, decompressed ("memmap"): a bit slower than RAM, takes 5-10 minutes for decompression first
 # - from Disk, compressed ("compressed"): very slow but no need for decompression, useful for debugging
+# Note that this will download the dataset automatically if not found
 dataset = env.get_dataset(mode="memmap", scale="small")
 
 # Auxillary tools for computing normalized scores or extracting deathlevels
