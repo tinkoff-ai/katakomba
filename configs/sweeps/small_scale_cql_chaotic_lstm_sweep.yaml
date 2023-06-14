@@ -1,0 +1,24 @@
+entity: tlab
+project: NetHack
+program: algorithms/small_scale/cql_chaotic_lstm.py
+method: grid
+parameters:
+  group:
+    value: "small_scale_cql_chaotic_lstm_sweep"
+  version:
+    value: 1
+  data_mode:
+    value: "memmap"
+  character:
+    value: "mon-hum-neu"
+  update_steps:
+    value: 250000
+  alpha:
+    values: [0.0001, 0.0005, 0.001, 0.05, 0.01, 0.05, 0.1, 0.5, 1.0]
+  train_seed:
+    values: [0, 1, 2]
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - ${args}

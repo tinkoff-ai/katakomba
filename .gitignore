@@ -2,16 +2,22 @@
 dev/
 
 # Data
-data/
+data
 ttyrecs.db
 
 # Misc
+**/.DS_Store
+loading_times.py
+*.pkl
+algorithms/small_scale/iql_chaotic_lstm_discrete.py
+run.sh
 test.py
 test.ipynb
 .ml-job-preset.yml
 mlc_run.sh
 wandb
 algorithms/bc_resnet_lstm_accelerate.py
+bin
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
