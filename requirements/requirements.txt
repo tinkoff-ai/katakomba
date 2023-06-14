@@ -1,21 +1,15 @@
-# Our typical stuff for offline-rl and jax
-git+https://github.com/tinkoff-ai/d4rl@master#egg=d4rl
+pybind11==2.10.3
+numba==0.56.4
+opencv-python==4.7.0.72
 tqdm==4.64.0
 wandb==0.12.21
-mujoco-py==2.1.2.14
 numpy==1.23.1
-gym[mujoco_py]==0.23.0
-
-sortedcontainers==2.4.0
+gym==0.23.0
 pyrallis==0.3.1
-
-# Some useful stuff seems to be
-cython
-scikit-build
-pybind11
-numba
-opencv-python
-
-transformers==4.25.1
-datasets==2.8.0
-accelerate==0.15.0
+h5py==3.8.0
+nle==0.9.0
+rliable==1.0.8
+matplotlib==3.6.2
+seaborn==0.12.1
+Pillow==9.2.0
+torch --pre --force-reinstall --index-url https://download.pytorch.org/whl/nightly/cu117
