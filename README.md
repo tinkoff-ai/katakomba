@@ -62,9 +62,9 @@ print(
   batch["tty_chars"],  # [batch_size, seq_len + 1, 80, 24]
   batch["tty_colors"], # [batch_size, seq_len + 1, 80, 24]
   batch["tty_cursor"], # [batch_size, seq_len + 1, 2]
-  batch["actions"],    # [batch_size, seq_len + 1, 1]
-  batch["rewards"],    # [batch_size, seq_len + 1, 1]
-  batch["dones"]       # [batch_size, seq_len + 1, 1]
+  batch["actions"],    # [batch_size, seq_len + 1]
+  batch["rewards"],    # [batch_size, seq_len + 1]
+  batch["dones"]       # [batch_size, seq_len + 1]
 )
 
 # In case you don't want to store the decompressed dataset beyond code execution
