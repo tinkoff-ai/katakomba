@@ -3,21 +3,22 @@
 <p align="center"><b>Katakomba</b> is an open-source benchmark for data-driven NetHack. At the moment, it provides a set of standardized datasets with familiar interfaces and offline RL baselines augmented with recurrence. Full training logs synced to the Weights&Biases are included.</p>
 
 ## Installation
-TO BE DONE
 
+For now, Katakomba is not pip installable. However, the installation is easy. 
+We also provide an alternative with the Dockerfile already set up to work (this is the preferred way!).
 ```bash
 git clone https://github.com/tinkoff-ai/katakomba.git && cd katakomba
-pip install -r requirements/requirements_dev.txt
+pip install -r requirements.txt
 
-# alternatively, you could use docker
-docker build -t <image_name> .
-docker run --gpus=all -it --rm --name <container_name> <image_name>
+# or alternatively, you could use docker
+docker build -t katakomba .
 ```
 
-1. ```cd katakomba/utils/render_utils/```
-
-2. ```pip install -e .```
-
+One last step is the installation of additional utils used for faster rendering of `tty` observations as images:
+```bash
+# use pip3 inside the docker container
+pip install -e katakomba/utils/render_utils/
+```
 
 ## Getting Started
 
@@ -139,5 +140,5 @@ We host all of the datasets on the [HuggingFace](https://huggingface.co/datasets
 
 ## Citing Katakamoba
 ```bibtex
-
+TO APPEAR SOON
 ```
