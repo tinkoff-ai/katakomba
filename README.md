@@ -88,7 +88,7 @@ In our benchmark, we treat every character configuration as a separate game to b
 
 Additionally, as benchmarking new algorithms on all of the datasets could be computationally expensive for many practitioners, we separate the benchmark into three categories, where ```roles > races > alignments``` as by wisdom of the NetHack community. 
 
-We host all of the datasets on the [HuggingFace Hub](https://huggingface.co/datasets/Howuhh/katakomba/tree/main/data), you can download them from there directly. But as we described above, our wrappers will take care of it automatically similar to the D4RL benchmark.
+We host all of the datasets on the [HuggingFace](https://huggingface.co/datasets/Howuhh/katakomba/tree/main/data), you can download them from there directly. But as we described above, our wrappers will take care of it automatically similar to the D4RL benchmark. The script for repacking the large-scale dataset can be found [here](scripts/generate_small_dataset.py).
 
 ### Tasks
 
