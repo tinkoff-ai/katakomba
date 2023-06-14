@@ -1,8 +1,8 @@
 ![Katakomba: Tools and Benchmarks for Data-Driven NetHack](katakomba.png)
 
-<p align="center"><b>Katakomba</b> is an open-source benchmark for data-driven NetHack. At the moment, it provides a set of standardized datasets with familiar interfaces and offline RL baselines augmented with recurrence with corresponding logs synced to the Weights&Biases.</p>
+<p align="center"><b>Katakomba</b> is an open-source benchmark for data-driven NetHack. At the moment, it provides a set of standardized datasets with familiar interfaces and offline RL baselines augmented with recurrence. Full training logs synced to the Weights&Biases are included.</p>
 
-## Getting started
+## Installation
 TO BE DONE
 
 ```bash
@@ -19,7 +19,60 @@ docker run --gpus=all -it --rm --name <container_name> <image_name>
 2. ```pip install -e .```
 
 
+## Getting Started
+
+```python
+from katakomba.env import NetHackChallenge, OfflineNetHackChallengeWrapper
+from katakomba.utils.datasets import SequentialBuffer
+
+# The task is specified using the character field
+env = NetHackChallenge (
+  character = "mon-hum-neu",
+  observation_keys = ["tty_chars", "tty_colors", "tty_cursor"]
+)
+
+# A convenient wrapper that provides interfaces for dataset loading, score normalization, and deathlevel extraction
+env = OfflineNetHackChallengeWrapper(env)
+
+# Several options for dataset reading (check the paper for details): 
+# - from RAM, decompressed ("in_memory"): fast but requires a lot of RAM, takes 5-10 minutes for decompression first
+# - from Disk, decompressed ("memmap"): a bit slower than RAM, takes 5-10 minutes for decompression first
+# - from Disk, compressed ("compressed"): very slow but no need for decompression, useful for debugging
+dataset = env.get_dataset(mode="memmap", scale="small")
+
+# Auxillary tools for computing normalized scores or extracting deathlevels
+env.get_normalized_score(score=1337.0)
+env.get_current_depth()
+
+# We also provide an example of a sequential replay buffer
+buffer = SequentialBuffer(
+  dataset=dataset,
+  seq_len=YOUR_SEQ_LEN,
+  batch_size=YOUR_BATCH_SIZE, # Each batch element is a different trajectory
+  seed=YOUR_SEED,
+  add_next_step=True # if you want (s, a, r, s') instead of (s, a, r)
+)
+
+# What's inside the batch?
+# Note that the next batch will include the +1 element as expected
+batch = buffer.sample()
+print(
+  batch["tty_chars"],  # [batch_size, seq_len + 1, 80, 24]
+  batch["tty_colors"], # [batch_size, seq_len + 1, 80, 24]
+  batch["tty_cursor"], # [batch_size, seq_len + 1, 2]
+  batch["actions"],    # [batch_size, seq_len + 1, 1]
+  batch["rewards"],    # [batch_size, seq_len + 1, 1]
+  batch["dones"]       # [batch_size, seq_len + 1, 1]
+)
+
+# In case you don't want to store the decompressed dataset beyond code execution
+dataset.close()
+````
+
+
 ## Baselines
+
+We also provide a set of offline RL baselines for discrete control augmented with recurrence. Implementations are based on the Chaotic-Dwarven-GPT-5 architecture and kept as simple as possible, feel free to dive in both full training logs and algorithms: you can find many useful stuff like sequential replay buffer or bias-corrected vectorized evaluation.
 
 | Algorithm                                                                                                                       | Variants Implemented                               | Wandb Report |
 |---------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------| ----------- |
