@@ -4,8 +4,8 @@
 
 ## Installation
 
-For now Katakomba is not pip installable. However, installation is easy, just install all the requirements. 
-We also provide an alternative with the dockerfile that is already set up to work.
+For now Katakomba is not pip installable. However, the installation is easy. 
+We also provide an alternative with the dockerfile that is already set up to work (this is a preferred way!).
 ```bash
 git clone https://github.com/tinkoff-ai/katakomba.git && cd katakomba
 pip install -r requirements.txt
