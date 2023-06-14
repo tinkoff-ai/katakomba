@@ -135,7 +135,7 @@ class NLDSmallDataset:
     def close(self, clear_cache=True):
         self.hdf5_file.close()
         if self.mode == "memmap" and clear_cache:
-            print("")
+            print("Cleaning memmap cache...")
             # remove memmap cache files from the disk upon closing
             cache_name = f"memmap-data-{self.role.value}-{self.race.value}-{self.align.value}-any"
             shutil.rmtree(os.path.join(CACHE_PATH, cache_name))

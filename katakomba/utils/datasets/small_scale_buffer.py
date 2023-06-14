@@ -3,17 +3,23 @@ import numpy as np
 from itertools import cycle
 from katakomba.utils.datasets.small_scale import NLDSmallDataset
 
+from typing import Dict, List
+
 
 # simple utility functions, you can also use map_tree analogs from dm-tree or optree
-def dict_slice(data, start, end):
+def dict_slice(
+        data: Dict[str, np.ndarray],
+        start: int,
+        end: int
+) -> Dict[str, np.ndarray]:
     return {k: v[start:end] for k, v in data.items()}
 
 
-def dict_concat(datas):
+def dict_concat(datas: List[Dict[str, np.ndarray]]) -> Dict[str, np.ndarray]:
     return {k: np.concatenate([d[k] for d in datas]) for k in datas[0].keys()}
 
 
-def dict_stack(datas):
+def dict_stack(datas: List[Dict[str, np.ndarray]]) -> Dict[str, np.ndarray]:
     return {k: np.stack([d[k] for d in datas]) for k in datas[0].keys()}
 
 
@@ -21,10 +27,10 @@ class SequentialBuffer:
     def __init__(
             self,
             dataset: NLDSmallDataset,
-            batch_size,
-            seq_len,
-            add_next_step=False,
-            seed=0
+            batch_size: int,
+            seq_len: int,
+            add_next_step: bool = False,
+            seed: int = 0
     ):
         self.traj = dataset
         self.traj_idxs = list(range(len(self.traj)))
@@ -70,5 +76,5 @@ class SequentialBuffer:
 
         return dict_stack(batch)
 
-    def close(self):
-        return self.traj.close()
+    def close(self, clear_cache=True):
+        return self.traj.close(clear_cache=clear_cache)
