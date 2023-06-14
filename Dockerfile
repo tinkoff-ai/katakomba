@@ -1,9 +1,6 @@
 FROM nvidia/cuda:11.7.1-cudnn8-devel-ubuntu20.04
 WORKDIR /workspace
 
-RUN rm /etc/apt/sources.list.d/cuda.list
-RUN rm /etc/apt/sources.list.d/nvidia-ml.list
-
 # python, dependencies for mujoco-py (and in general useful for RL research),
 # from https://github.com/openai/mujoco-py
 RUN apt-get update -q \
@@ -11,8 +8,6 @@ RUN apt-get update -q \
     python3-pip \
     build-essential \
     patchelf \
-    curl \
-    git \
     libgl1-mesa-dev \
     libgl1-mesa-glx \
     libglew-dev \
@@ -53,4 +48,5 @@ RUN apt-get update && apt-get install -yq \
 COPY . /opt/nle
 
 COPY requirements.txt requirements.txt
-RUN pip install -r requirements.txt
+RUN pip3 install --upgrade pip setuptools wheel
+RUN pip3 install -r requirements.txt

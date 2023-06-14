@@ -27,7 +27,7 @@ def download_dataset(
     print(f"Downloading dataset: {dataset_url} to {DATA_PATH}")
     urllib.request.urlretrieve(dataset_url, dataset_path)
 
-    if not os.path.exists(os.path.join(filename.split("/")[-1], DATA_PATH)):
+    if not os.path.exists(os.path.join(DATA_PATH, filename.split("/")[-1])):
         raise IOError(f"Failed to download dataset from {dataset_url}")
 
 
