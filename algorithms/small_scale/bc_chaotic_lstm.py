@@ -20,7 +20,7 @@ from katakomba.nn.chaotic_dwarf import TopLineEncoder, BottomLinesEncoder, Scree
 from katakomba.utils.render import SCREEN_SHAPE, render_screen_image
 from katakomba.utils.datasets import SequentialBuffer
 from katakomba.utils.misc import Timeit
-from typing import Optional
+from typing import Optional, Tuple, List, Dict
 
 torch.backends.cudnn.benchmark = True
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -70,7 +70,7 @@ def set_seed(seed: int):
 
 
 @torch.no_grad()
-def filter_wd_params(model: nn.Module):
+def filter_wd_params(model: nn.Module) -> Tuple[List[nn.parameter.Parameter], List[nn.parameter.Parameter]]:
     no_decay, decay = [], []
     for name, param in model.named_parameters():
         if hasattr(param, 'requires_grad') and not param.requires_grad:
@@ -83,7 +83,7 @@ def filter_wd_params(model: nn.Module):
     return no_decay, decay
 
 
-def dict_to_tensor(data, device):
+def dict_to_tensor(data: Dict[str, np.ndarray], device: str) -> Dict[str, torch.Tensor]:
     return {k: torch.as_tensor(v, device=device) for k, v in data.items()}
 
 
@@ -162,7 +162,13 @@ class Actor(nn.Module):
 
 
 @torch.no_grad()
-def vec_evaluate(vec_env, actor, num_episodes,  seed=0, device="cpu"):
+def vec_evaluate(
+        vec_env: AsyncVectorEnv,
+        actor: Actor,
+        num_episodes: int,
+        seed: str = 0,
+        device: str = "cpu"
+) -> Dict[str, np.ndarray]:
     actor.eval()
     # set seed for reproducibility (reseed=False by default)
     vec_env.seed(seed)

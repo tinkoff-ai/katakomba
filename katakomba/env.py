@@ -143,7 +143,7 @@ class OfflineNetHackChallengeWrapper(gym.Wrapper):
          Returns score normalized against AutoAscend bot scores achieved for this exact character.
         """
         if self.character.count("-") != 2:
-            raise ValueError("Reference score not provided for this character.")
+            raise ValueError("Reference score is not provided for this character.")
 
         role, race, align = self.character.split("-")
         role, race, align = Role(role), Race(race), Alignment(align)
@@ -167,7 +167,7 @@ class OfflineNetHackChallengeWrapper(gym.Wrapper):
 
     def get_dataset(self, scale: str = "small", **kwargs):
         if self.character.count("-") != 2:
-            raise ValueError("Reference score not provided for this character.")
+            raise ValueError("Reference score is not provided for this character.")
 
         role, race, align = self.character.split("-")
         role, race, align = Role(role), Race(race), Alignment(align)

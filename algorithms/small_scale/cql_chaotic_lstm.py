@@ -15,7 +15,7 @@ from tqdm.auto import tqdm, trange
 import numpy as np
 
 from copy import deepcopy
-from typing import Optional, Dict, Tuple, Any
+from typing import Optional, Dict, Tuple, Any, List
 
 from multiprocessing import set_start_method
 from katakomba.env import NetHackChallenge, OfflineNetHackChallengeWrapper
@@ -79,7 +79,7 @@ def set_seed(seed: int):
 
 
 @torch.no_grad()
-def filter_wd_params(model: nn.Module):
+def filter_wd_params(model: nn.Module) -> Tuple[List[nn.parameter.Parameter], List[nn.parameter.Parameter]]:
     no_decay, decay = [], []
     for name, param in model.named_parameters():
         if hasattr(param, 'requires_grad') and not param.requires_grad:
@@ -92,11 +92,11 @@ def filter_wd_params(model: nn.Module):
     return no_decay, decay
 
 
-def dict_to_tensor(data, device):
+def dict_to_tensor(data: Dict[str, np.ndarray], device: str) -> Dict[str, torch.Tensor]:
     return {k: torch.as_tensor(v, dtype=torch.float, device=device) for k, v in data.items()}
 
 
-def soft_update(target, source, tau):
+def soft_update(target: nn.Module, source: nn.Module, tau: float):
     for tp, sp in zip(target.parameters(), source.parameters()):
         tp.data.copy_((1 - tau) * tp.data + tau * sp.data)
 
@@ -214,7 +214,13 @@ def cql_loss(
 
 
 @torch.no_grad()
-def vec_evaluate(vec_env, actor, num_episodes,  seed=0, device="cpu"):
+def vec_evaluate(
+        vec_env: AsyncVectorEnv,
+        actor: Critic,
+        num_episodes: int,
+        seed: int = 0,
+        device: str = "cpu"
+) -> Dict[str, np.ndarray]:
     actor.eval()
     # set seed for reproducibility (reseed=False by default)
     vec_env.seed(seed)
