@@ -145,5 +145,12 @@ We host all of the datasets on the [HuggingFace](https://huggingface.co/datasets
 
 ## Citing Katakamoba
 ```bibtex
-TO APPEAR SOON
+@misc{kurenkov2023katakomba,
+      title={Katakomba: Tools and Benchmarks for Data-Driven NetHack}, 
+      author={Vladislav Kurenkov and Alexander Nikulin and Denis Tarasov and Sergey Kolesnikov},
+      year={2023},
+      eprint={2306.08772},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
 ```
