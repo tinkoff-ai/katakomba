@@ -3,7 +3,8 @@
 <p align="center"><b>Katakomba</b> is an open-source benchmark for data-driven NetHack. At the moment, it provides a set of standardized datasets with familiar interfaces and offline RL baselines augmented with recurrence. Full training logs synced to the Weights&Biases are included.</p>
 
 <div align="center">
-
+  
+  [![Twitter](https://badgen.net/badge/icon/twitter?icon=twitter&label)](https://twitter.com/vladkurenkov/status/1669826074488782849)
   [![arXiv](https://img.shields.io/badge/arXiv-2306.08772-b31b1b.svg)](https://arxiv.org/abs/2306.08772)
 </div>
 
