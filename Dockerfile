@@ -45,8 +45,7 @@ RUN echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https:
 RUN apt-get update && apt-get install -yq \
     cmake \
     kitware-archive-keyring
-COPY . /opt/nle
+COPY . /workspace/
 
-COPY requirements.txt requirements.txt
 RUN pip3 install --upgrade pip setuptools wheel
 RUN pip3 install -r requirements.txt
