@@ -18,6 +18,7 @@ pip install -r requirements.txt
 
 # or alternatively, you could use docker
 docker build -t katakomba .
+docker run --gpus all -it --rm --name katakomba katakomba
 ```
 
 One last step is the installation of additional utils used for faster rendering of `tty` observations as images:
